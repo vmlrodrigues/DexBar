@@ -296,20 +296,27 @@ struct SettingsView: View {
     }
 
     private var accountStatus: String {
-        if let plan = displayPlan(model.snapshot?.planType) { return "ChatGPT \(plan)" }
         switch model.state {
         case .needsAuthentication: return "Sign-in needed"
         case .cliUnavailable: return "Not installed"
-        default: return "Connected"
+        default:
+            if let plan = displayPlan(model.snapshot?.planType) { return "ChatGPT \(plan)" }
+            return "Connected"
         }
     }
 
     private var accountSymbol: String {
-        model.snapshot == nil ? "exclamationmark.circle" : "checkmark.circle.fill"
+        switch model.state {
+        case .needsAuthentication, .cliUnavailable: return "exclamationmark.circle"
+        default: return model.snapshot == nil ? "exclamationmark.circle" : "checkmark.circle.fill"
+        }
     }
 
     private var accountColor: Color {
-        model.snapshot == nil ? .orange : .green
+        switch model.state {
+        case .needsAuthentication, .cliUnavailable: return .orange
+        default: return model.snapshot == nil ? .orange : .green
+        }
     }
 
     private func group<Content: View>(@ViewBuilder content: () -> Content) -> some View {

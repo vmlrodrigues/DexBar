@@ -162,9 +162,119 @@ final class DexBarCoreTests: XCTestCase {
         ))
     }
 
+    func testNotificationLedgerUsesRawPercentAndSurvivesRelaunchAndResetJitter() throws {
+        let reset = now.addingTimeInterval(4 * 86_400)
+        var ledger = NotificationLedger()
+
+        let roundedButBelowThreshold = snapshot(percent: 79.6, reset: reset)
+        XCTAssertTrue(ledger.evaluate(snapshot: roundedButBelowThreshold, projection: nil).isEmpty)
+
+        let warning = snapshot(percent: 80, reset: reset)
+        XCTAssertEqual(
+            ledger.evaluate(snapshot: warning, projection: nil).map(\.identifier),
+            ["codex.primary/80"]
+        )
+
+        let persisted = try JSONEncoder().encode(ledger)
+        var relaunched = try JSONDecoder().decode(NotificationLedger.self, from: persisted)
+        let jittered = snapshot(percent: 81, reset: reset.addingTimeInterval(1))
+        XCTAssertTrue(relaunched.evaluate(snapshot: jittered, projection: nil).isEmpty)
+
+        let nextWindow = snapshot(percent: 81, reset: reset.addingTimeInterval(7 * 86_400))
+        XCTAssertEqual(
+            relaunched.evaluate(snapshot: nextWindow, projection: nil).map(\.identifier),
+            ["codex.primary/80"]
+        )
+    }
+
+    func testNotificationProjectionDoesNotRearmWhenEstimateTemporarilyDisappears() {
+        var ledger = NotificationLedger()
+        let usage = snapshot(percent: 50, reset: now.addingTimeInterval(3 * 86_400))
+        let above = Projection(
+            projectedPercent: 105,
+            pointsPerDay: 10,
+            daysRemaining: 3,
+            outlook: .mayRunOut,
+            limitReachedAt: nil
+        )
+        let below = Projection(
+            projectedPercent: 90,
+            pointsPerDay: 5,
+            daysRemaining: 3,
+            outlook: .onTrack,
+            limitReachedAt: nil
+        )
+
+        XCTAssertEqual(
+            ledger.evaluate(snapshot: usage, projection: above).map(\.identifier),
+            ["weekly/projection"]
+        )
+        XCTAssertTrue(ledger.evaluate(snapshot: usage, projection: nil).isEmpty)
+        XCTAssertTrue(ledger.evaluate(snapshot: usage, projection: above).isEmpty)
+        XCTAssertTrue(ledger.evaluate(snapshot: usage, projection: below).isEmpty)
+        XCTAssertEqual(
+            ledger.evaluate(snapshot: usage, projection: above).map(\.identifier),
+            ["weekly/projection"]
+        )
+    }
+
+    func testClientTimeoutForceKillsAnUnresponsiveProcess() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DexBarTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let executable = directory.appendingPathComponent("unresponsive-codex")
+        let script = """
+        #!/bin/sh
+        trap '' TERM
+        while :; do
+          printf 'diagnostic output that must be drained while waiting\n' >&2
+        done
+        """
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executable.path
+        )
+
+        let started = Date()
+        do {
+            _ = try await CodexAppServerClient(
+                executableURL: executable,
+                requestTimeout: 0.1,
+                terminationGrace: 0.1
+            ).fetch(now: now)
+            XCTFail("Expected the unresponsive process to time out")
+        } catch CodexClientError.timeout {
+            // Expected.
+        } catch {
+            XCTFail("Expected timeout, received \(error)")
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1.5)
+    }
+
     func testDurationFormattingUsesDaysThenHours() {
         XCTAssertEqual(shortDuration(6 * 86_400 + 23 * 3_600), "6d 23h")
         XCTAssertEqual(shortDuration(5_520), "1h 32m")
+    }
+
+    private func snapshot(percent: Double, reset: Date) -> UsageSnapshot {
+        UsageSnapshot(
+            weekly: UsageWindow(
+                id: "codex.primary",
+                bucketID: "codex",
+                bucketName: "General",
+                usedPercent: percent,
+                durationMinutes: 10_080,
+                resetsAt: reset
+            ),
+            supplementary: [],
+            planType: "pro",
+            credits: nil,
+            resetCreditsAvailable: 0,
+            fetchedAt: now
+        )
     }
 
     private func mappedSnapshot(

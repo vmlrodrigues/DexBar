@@ -57,7 +57,21 @@ struct PopoverView: View {
     private var content: some View {
         if let snapshot = model.snapshot {
             VStack(spacing: 0) {
-                if case .stale(let message) = model.state {
+                if case .needsAuthentication = model.state {
+                    recoveryBanner(
+                        "Codex needs you to sign in again.",
+                        symbol: "person.crop.circle.badge.exclamationmark",
+                        button: "Sign In",
+                        action: openSignIn
+                    )
+                } else if case .cliUnavailable = model.state {
+                    recoveryBanner(
+                        "Codex CLI was not found. The last reading is shown below.",
+                        symbol: "exclamationmark.triangle",
+                        button: "Open Terminal",
+                        action: openSignIn
+                    )
+                } else if case .stale(let message) = model.state {
                     stateBanner(message, symbol: "wifi.exclamationmark", color: .orange)
                 }
                 VStack(spacing: 14) {
@@ -149,13 +163,21 @@ struct PopoverView: View {
     }
 
     private var freshnessText: String {
+        switch model.state {
+        case .needsAuthentication: return "Sign-in needed"
+        case .cliUnavailable: return "Codex not found"
+        default: break
+        }
         guard let fetched = model.snapshot?.fetchedAt else { return "Not connected" }
         let age = now.timeIntervalSince(fetched)
         return age < 60 ? "Updated just now" : "Updated \(shortDuration(age)) ago"
     }
 
     private var freshnessColor: Color {
-        if case .stale = model.state { return .orange }
+        switch model.state {
+        case .stale, .needsAuthentication, .cliUnavailable, .failed: return .orange
+        default: break
+        }
         return model.snapshot == nil ? .secondary : .green
     }
 
@@ -167,6 +189,26 @@ struct PopoverView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
             .background(color.opacity(0.10))
+    }
+
+    private func recoveryBanner(
+        _ text: String,
+        symbol: String,
+        button: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            Label(text, systemImage: symbol)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(button, action: action)
+                .controlSize(.small)
+                .mouseOnlyPopoverControl()
+        }
+        .font(.system(size: 10))
+        .foregroundStyle(.orange)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(Color.orange.opacity(0.10))
     }
 
     private func setupPanel(title: String, message: String, button: String, action: @escaping () -> Void) -> some View {

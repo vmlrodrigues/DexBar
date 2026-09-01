@@ -1,16 +1,18 @@
 # Verification
 
-Verification completed on 31 August 2026.
+Verification updated on 2 September 2026.
 
 ## Automated checks
 
 - Debug and release Swift builds complete successfully.
-- All nine core tests pass.
+- All twelve core tests pass.
 - A live Codex app-server probe returns the signed-in ChatGPT plan and usage windows.
 - The current live response maps the seven-day general limit to the weekly display.
 - The current zero-valued five-hour bucket is filtered out.
 - Synthetic tests confirm that an active or reached five-hour bucket appears, and that a quiet model-specific weekly bucket stays hidden until warning level.
 - Projection tests cover the 24-hour weekly minimum, one-hour short-window minimum, 60% short-window display threshold, measured rate, horizon uncertainty, and reset date matching.
+- Notification tests verify raw 80%/95% crossings, persisted relaunch latches, reset timestamp jitter, window rollover, and projection rearming.
+- A hostile app-server fixture that floods stderr and ignores termination is force-killed within the configured deadline.
 - Carbon global-hotkey support and its local shortcut recorder compile without adding an Accessibility entitlement or permission prompt.
 - The non-visual shortcut self-check successfully registers and releases a temporary Carbon hotkey through the production registration path.
 - Static renders were inspected in current, active-window, warning, critical, stale, authentication, dark-mode, onboarding, and settings states.
@@ -24,11 +26,11 @@ Verification completed on 31 August 2026.
 - Meter: 10-point height and projection treatment visually match ClawBar's rendered reference, including the landing marker and off-scale chevrons.
 - Popover buttons: explicitly excluded from keyboard focus and focus-effect rendering while retaining native button accessibility actions.
 - Menu Bar Settings: shortcut enablement, recorder, clear action, registration status, and permission explanation fit without clipping.
-- Settings: native semantic typography and all controls fit without clipping in the 600 × 410 window.
+- Settings: native semantic typography and all controls fit without clipping in the 620 × 420 window.
 - Onboarding: explains the existing Codex sign-in and local history before enabling alerts.
 
 The native hidden-launch check confirmed that the packaged process stayed responsive and exposed only hidden window-server surfaces. Offsider pixel capture and accessibility inspection were unavailable because the host had not granted those permissions and its display was asleep; visual verification therefore used DexBar's own offscreen renderer.
 
 ## Release notes
 
-The output is a locally ad-hoc-signed application. Distribution outside this Mac will require a Developer ID signature and notarization.
+`Scripts/build.sh`, `Scripts/notarize.sh`, and `Scripts/release.sh` provide Developer ID signing, two-stage notarisation and stapling, DMG packaging, Gatekeeper assessment, source/build/remote identity checks, and explicit GitHub publication. A public candidate must pass that complete path; `SIGN=0` output remains local-only.

@@ -5,13 +5,20 @@ import DexBarCore
 @MainActor
 final class Notifier {
     static let thresholds = [80, 95]
+    private static let ledgerKey = "notificationLedger.v1"
 
-    private struct WindowState {
-        var resetsAt: Date?
-        var fired: Set<Int> = []
-        var projectionFired = false
+    private let defaults: UserDefaults
+    private var ledger: NotificationLedger
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let data = defaults.data(forKey: Self.ledgerKey),
+           let saved = try? JSONDecoder().decode(NotificationLedger.self, from: data) {
+            ledger = saved
+        } else {
+            ledger = NotificationLedger()
+        }
     }
-    private var states: [String: WindowState] = [:]
 
     func requestAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -24,50 +31,34 @@ final class Notifier {
     @discardableResult
     func evaluate(snapshot: UsageSnapshot, projection: Projection?) -> [String] {
         guard Preferences.shared.notificationsEnabled else { return [] }
-        var fired: [String] = []
-        for window in [snapshot.weekly] + snapshot.supplementary {
-            fired += check(window)
-        }
+        let events = ledger.evaluate(
+            snapshot: snapshot,
+            projection: projection,
+            thresholds: Self.thresholds
+        )
+        persistLedger()
 
-        var weeklyState = states[snapshot.weekly.id] ?? WindowState()
-        if weeklyState.resetsAt != snapshot.weekly.resetsAt {
-            weeklyState = WindowState(resetsAt: snapshot.weekly.resetsAt)
-        }
-        if let projection, projection.projectedPercent >= 100, !weeklyState.projectionFired {
-            weeklyState.projectionFired = true
-            fired.append("weekly/projection")
-            post(
-                title: "Weekly usage may run out",
-                body: "At the current pace, DexBar projects \(projection.projectedPercent)% by reset."
-            )
-        } else if projection?.projectedPercent ?? 0 < 95 {
-            weeklyState.projectionFired = false
-        }
-        states[snapshot.weekly.id] = weeklyState
-        return fired
-    }
-
-    private func check(_ window: UsageWindow) -> [String] {
-        var state = states[window.id] ?? WindowState()
-        if state.resetsAt != window.resetsAt {
-            state = WindowState(resetsAt: window.resetsAt)
-        }
-        var fired: [String] = []
-        for threshold in Self.thresholds {
-            if window.roundedPercent >= threshold, !state.fired.contains(threshold) {
-                state.fired.insert(threshold)
-                fired.append("\(window.id)/\(threshold)")
+        for event in events {
+            switch event {
+            case .threshold(let window, _):
                 let prefix = window.bucketName == "General" ? "" : "\(window.bucketName) "
                 post(
                     title: "\(prefix)\(window.title) at \(window.roundedPercent)%",
                     body: "Resets \(clockTime(window.resetsAt)) · in \(shortDuration(window.resetsAt.timeIntervalSinceNow))."
                 )
-            } else if window.roundedPercent < threshold - 5 {
-                state.fired.remove(threshold)
+            case .weeklyProjection(let projectedPercent):
+                post(
+                    title: "Weekly usage may run out",
+                    body: "At the current pace, DexBar projects \(projectedPercent)% by reset."
+                )
             }
         }
-        states[window.id] = state
-        return fired
+        return events.map(\.identifier)
+    }
+
+    private func persistLedger() {
+        guard let data = try? JSONEncoder().encode(ledger) else { return }
+        defaults.set(data, forKey: Self.ledgerKey)
     }
 
     private func post(title: String, body: String) {

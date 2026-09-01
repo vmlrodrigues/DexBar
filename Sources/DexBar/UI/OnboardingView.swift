@@ -61,31 +61,37 @@ struct OnboardingView: View {
     }
 
     private var connectionTitle: String {
-        if model.snapshot != nil { return "Codex is connected" }
         switch model.state {
         case .loading: return "Checking Codex"
         case .needsAuthentication: return "Codex sign-in needed"
         case .cliUnavailable: return "Codex CLI not found"
-        default: return "Couldn’t check Codex"
+        default: return model.snapshot == nil ? "Couldn’t check Codex" : "Codex is connected"
         }
     }
 
     private var connectionDetail: String {
-        if let plan = displayPlan(model.snapshot?.planType) { return "Signed in with ChatGPT \(plan)" }
         switch model.state {
         case .loading: return "This takes a moment."
         case .needsAuthentication: return "Run codex login in Terminal, then refresh."
         case .cliUnavailable: return "Install Codex, then sign in with ChatGPT."
         case .failed(let message), .stale(let message): return message
-        default: return "Uses your existing Codex CLI sign-in."
+        default:
+            if let plan = displayPlan(model.snapshot?.planType) { return "Signed in with ChatGPT \(plan)" }
+            return "Uses your existing Codex CLI sign-in."
         }
     }
 
     private var connectionSymbol: String {
-        model.snapshot == nil ? "exclamationmark.circle" : "checkmark.circle.fill"
+        switch model.state {
+        case .needsAuthentication, .cliUnavailable: return "exclamationmark.circle"
+        default: return model.snapshot == nil ? "exclamationmark.circle" : "checkmark.circle.fill"
+        }
     }
 
     private var connectionColor: Color {
-        model.snapshot == nil ? .orange : .green
+        switch model.state {
+        case .needsAuthentication, .cliUnavailable: return .orange
+        default: return model.snapshot == nil ? .orange : .green
+        }
     }
 }

@@ -31,10 +31,25 @@ The optional global shortcut uses macOS's Carbon hotkey registration. It receive
 
 ```sh
 swift test
-./Scripts/build.sh
+SIGN=0 ./Scripts/build.sh
 ```
 
-The app bundle is written to `dist/DexBar.app` and receives an ad-hoc signature for local use. Set `SIGN=1` and `IDENTITY` to produce a Developer ID-signed local build.
+The app bundle is written to `dist/DexBar.app`. Local builds use `SIGN=0`; the default release build finds a Developer ID Application identity and applies a hardened-runtime, timestamped signature.
+
+## Releasing
+
+DexBar follows the same guarded release path as ClawBar:
+
+```sh
+./Scripts/build.sh       # Developer ID signing
+./Scripts/notarize.sh    # notarise and staple the app and DMG
+./Scripts/release.sh     # verify source/artifact/remote identity; stage assets
+PUBLISH=1 ./Scripts/release.sh
+```
+
+Copy `.env.example` to `.env` first and provide an App Store Connect API key. The release guard refuses dirty source, duplicate versions, mismatched Git-derived build numbers, unpushed commits, unsigned artifacts, and unstapled artifacts. Published releases include a versioned DMG, a stable latest-download DMG, and a SHA-256 checksum.
+
+Version 0.1 uses GitHub Releases for updates; DexBar does not silently install updates.
 
 ## Project layout
 
@@ -44,3 +59,7 @@ The app bundle is written to `dist/DexBar.app` and receives an ad-hoc signature 
 - `Scripts/build.sh` assembles the standalone `.app` bundle.
 
 DexBar is an independent, unofficial tool. It is not made or endorsed by OpenAI.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).

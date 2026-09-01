@@ -108,7 +108,13 @@ enum DexBarMain {
     @MainActor
     private static func renderPopover(path: String, state: String) {
         let snapshot = state == "auth" ? nil : previewSnapshot(state: state)
-        let loadState: LoadState = state == "auth" ? .needsAuthentication : (state == "stale" ? .stale("Offline — showing the last reading.") : .ok)
+        let loadState: LoadState
+        switch state {
+        case "auth", "auth-retained": loadState = .needsAuthentication
+        case "cli-retained": loadState = .cliUnavailable
+        case "stale": loadState = .stale("Offline — showing the last reading.")
+        default: loadState = .ok
+        }
         let projection: Projection?
         switch state {
         case "warning": projection = Projection(projectedPercent: 109, pointsPerDay: 5.0, daysRemaining: 6.95, outlook: .mayRunOut, limitReachedAt: Date().addingTimeInterval(5.2 * 86_400))

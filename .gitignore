@@ -1,4 +1,10 @@
+.env
+.env.*
+!.env.example
+
 .build/
+.swiftpm/
+Package.resolved
 dist/
 .DS_Store
 *.xcuserstate
