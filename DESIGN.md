@@ -1,0 +1,62 @@
+# DexBar design
+
+## Product rule
+
+The app answers one question at a glance: “How much of my useful Codex allowance remains?” The weekly window is the stable default. Extra meters are conditional information, not permanent furniture.
+
+## Window visibility
+
+1. Choose the longest general Codex window as the weekly baseline.
+2. Hide zero-valued or otherwise inactive secondary windows.
+3. Show an active shorter window immediately, with its model name when provided.
+4. Keep parallel long model-specific windows hidden until they reach 80%.
+5. Surface the most urgent visible window in the menu bar; otherwise keep the menu bar on weekly usage.
+
+This rule is based on the limits Codex returns rather than assuming every account has a five-hour window.
+
+## Interface
+
+- AppKit owns the `NSStatusItem`, `NSPopover`, and settings/onboarding windows.
+- SwiftUI renders the popover, settings, onboarding, meters, state messages, and reusable controls.
+- The app is an `LSUIElement`, so it has no Dock icon or normal app menu presence.
+- The menu bar uses a compact monochrome calendar mark plus percentage and/or reset time.
+- Green/neutral is normal, orange starts at 80%, and red starts at 95%.
+- Usage meters are 10 points high, matching ClawBar and standard macOS storage/battery-style meters rather than reading as hairlines.
+- Popover icon controls are pointer-only: they remain accessibility actions but are removed from the Tab loop and do not draw keyboard focus plates.
+
+## Global shortcut
+
+DexBar can show or hide the popover from any app using `RegisterEventHotKey`. This is the same permission-free Carbon path used by ClawBar; it does not install a global keyboard monitor or request Accessibility access. Recording uses a local event monitor only while DexBar's Settings window is key.
+
+The shortcut ships disabled and unbound. Settings requires Control or Option in the combination, preventing a global Command-only binding from overriding the frontmost app's ordinary menu shortcuts. Registration failures are visible rather than silently accepting a combination already owned by another app.
+
+When the shortcut opens the popover, DexBar activates first because an accessory app is not brought forward implicitly by a global hotkey. Closing does not activate, avoiding an unnecessary focus steal.
+
+## Data flow
+
+```text
+Codex CLI app-server
+        │ account/rateLimits/read
+        ▼
+response mapper ──► visibility rules ──► AppModel ──► status item + popover
+                                              │
+                                              └──► local projection history
+```
+
+Each read uses a fresh short-lived app-server process and performs the documented initialize handshake. Refreshing is adaptive: opening the popover, waking the Mac, or recent Codex activity refreshes quickly; idle checks back off.
+
+The session-folder activity watcher is only a refresh hint. It is never treated as an authority for usage and its failure cannot corrupt the displayed limits.
+
+## Projection
+
+The estimator is ported from ClawBar's backtested design. It measures percentage points per day since the most recent observed zeroing for the same reset timestamp, then extrapolates that rate to the reset date. A horizon-based confidence margin—`max(3, 1.5 × days remaining)`—classifies the result as on track, uncertain, or likely to run out.
+
+Weekly projection starts after 24 hours of observations. Short-window projection starts after one hour but remains invisible below a projected 60%, because five-hour usage is commonly front-loaded and a low estimate is unactionable furniture. Samples expire after eight days, reset changes naturally start a new baseline, and the user can clear history in Settings.
+
+The projected extent is drawn beneath current usage as a translucent continuation. An anchored marker labels projections up to 100%; off-scale projections replace the false 100% endpoint with one to three chevrons and a right-aligned value.
+
+## Failure behaviour
+
+- A temporary refresh failure retains the last successful snapshot and marks it stale.
+- Missing Codex CLI and expired sign-in have dedicated recovery copy.
+- Unknown or newly introduced limit buckets are handled by duration and activity rather than a fixed list of model names.
