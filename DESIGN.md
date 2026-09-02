@@ -32,6 +32,29 @@ The shortcut ships disabled and unbound. Settings requires Control or Option in 
 
 When the shortcut opens the popover, DexBar activates first because an accessory app is not brought forward implicitly by a global hotkey. Closing does not activate, avoiding an unnecessary focus steal.
 
+## Software updates
+
+DexBar uses Sparkle 2.9.5. `SUEnableAutomaticChecks` and an 86,400-second interval make it
+check the public appcast once per day. `SUAutomaticallyUpdate` is deliberately absent:
+Sparkle presents the available update and the user chooses when to install it. Settings
+also exposes a manual **Check Now** action without adding another sidebar destination.
+
+The appcast lives in the public GitHub repository and every versioned DMG is signed with a
+DexBar-specific EdDSA key. The private key lives only in the developer's login Keychain;
+the public key is baked into `Info.plist`. Losing or changing that private key would prevent
+already-installed copies from accepting future releases.
+
+SwiftPM does not assemble an app bundle, so the build script embeds `Sparkle.framework`
+and signs its nested XPC services and helper executables from the inside out before signing
+DexBar. The updater's UI delegate activates the dockless app before Sparkle presents a
+modal alert, preventing scheduled-update UI from appearing behind another application.
+
+The release script stages a candidate appcast alongside the signed release assets and
+refuses to sign it unless the selected Keychain account derives the public key embedded in
+the app. On an explicit publish it creates the GitHub release first, then commits and pushes
+the repository appcast and verifies that commit on the remote branch. This ordering prevents
+installed copies from being offered a download URL that is not live yet.
+
 ## Data flow
 
 ```text

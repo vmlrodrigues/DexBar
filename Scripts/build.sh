@@ -46,11 +46,42 @@ if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
     cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/"
 fi
 
+SPARKLE_LICENSE="$ROOT/Resources/ThirdPartyLicenses/Sparkle-LICENSE.txt"
+[ -f "$SPARKLE_LICENSE" ] \
+    || { echo "error: bundled Sparkle licence is missing: $SPARKLE_LICENSE" >&2; exit 1; }
+cp "$SPARKLE_LICENSE" "$APP/Contents/Resources/"
+
+# SwiftPM builds Sparkle but does not know how to place a dynamic framework inside the
+# hand-assembled .app bundle. `ditto` preserves the framework's symlink structure.
+SPARKLE_FW="$(find "$ROOT/.build/artifacts/sparkle" -type d -name 'Sparkle.framework' -path '*macos*' 2>/dev/null | head -1)"
+if [ -n "$SPARKLE_FW" ]; then
+    echo "==> Embedding Sparkle"
+    mkdir -p "$APP/Contents/Frameworks"
+    ditto "$SPARKLE_FW" "$APP/Contents/Frameworks/Sparkle.framework"
+else
+    echo "error: Sparkle.framework not found — run 'swift package resolve' first" >&2
+    exit 1
+fi
+
 if [ "$SIGN" = "1" ]; then
     IDENTITY="${IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/{print $2; exit}')}"
     [ -n "$IDENTITY" ] || { echo "error: no Developer ID Application identity" >&2; exit 1; }
+
+    # Sparkle contains independently signed nested executables. Re-sign them from the
+    # inside out so the outer signatures cover their final bytes, preserving the XPC
+    # services' shipped entitlements.
+    FW="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+    for xpc in Installer Downloader; do
+        codesign --force --options runtime --timestamp \
+                 --preserve-metadata=entitlements \
+                 --sign "$IDENTITY" "$FW/XPCServices/$xpc.xpc"
+    done
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$FW/Autoupdate"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$FW/Updater.app"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+             "$APP/Contents/Frameworks/Sparkle.framework"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
-    codesign --verify --strict --verbose=2 "$APP"
+    codesign --verify --strict --deep --verbose=2 "$APP"
     echo "==> Gatekeeper assessment (expected to fail until notarised):"
     spctl --assess --type execute --verbose=4 "$APP" 2>&1 || true
 else

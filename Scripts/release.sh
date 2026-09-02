@@ -7,14 +7,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/dist/DexBar.app"
 DMG="$ROOT/dist/DexBar.dmg"
+APPCAST="$ROOT/appcast.xml"
 REPO="${GITHUB_REPO:-vmlrodrigues/DexBar}"
 REMOTE="${GIT_REMOTE:-origin}"
+SPARKLE_ACCOUNT="${SPARKLE_ACCOUNT:-DexBar}"
 
 [ -d "$APP" ] || { echo "error: $APP not found" >&2; exit 1; }
 [ -f "$DMG" ] || { echo "error: $DMG not found — run Scripts/notarize.sh" >&2; exit 1; }
 xcrun stapler validate "$APP" >/dev/null
 xcrun stapler validate "$DMG" >/dev/null
-codesign --verify --strict --verbose=2 "$APP"
+codesign --verify --strict --deep --verbose=2 "$APP"
 spctl --assess --type open --context context:primary-signature --ignore-cache "$DMG"
 
 plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist"; }
@@ -49,14 +51,44 @@ REMOTE_HEAD="$(git -C "$ROOT" rev-parse "$REMOTE/$BRANCH")"
 
 VERSIONED="$ROOT/dist/DexBar-$VERSION.dmg"
 CHECKSUM="$ROOT/dist/DexBar-$VERSION.sha256"
+APPCAST_CANDIDATE="$ROOT/dist/appcast.xml"
 cp "$DMG" "$VERSIONED"
 (cd "$ROOT/dist" && shasum -a 256 "DexBar-$VERSION.dmg" > "DexBar-$VERSION.sha256")
+
+SIGN_UPDATE="$(find "$ROOT/.build/artifacts/sparkle" -type f -name sign_update 2>/dev/null | head -1)"
+[ -x "$SIGN_UPDATE" ] \
+    || { echo "error: Sparkle sign_update not found — run 'swift package resolve'" >&2; exit 1; }
+GENERATE_KEYS="$(dirname "$SIGN_UPDATE")/generate_keys"
+[ -x "$GENERATE_KEYS" ] \
+    || { echo "error: Sparkle generate_keys not found beside sign_update" >&2; exit 1; }
+
+EMBEDDED_PUBLIC_KEY="$(plist SUPublicEDKey | tr -d '[:space:]')"
+SIGNING_PUBLIC_KEY="$("$GENERATE_KEYS" --account "$SPARKLE_ACCOUNT" -p | tr -d '[:space:]')"
+[ -n "$EMBEDDED_PUBLIC_KEY" ] && [ "$SIGNING_PUBLIC_KEY" = "$EMBEDDED_PUBLIC_KEY" ] || {
+    echo "error: Sparkle account '$SPARKLE_ACCOUNT' does not match the public key in the app" >&2
+    echo "       embedded: $EMBEDDED_PUBLIC_KEY" >&2
+    echo "       keychain: $SIGNING_PUBLIC_KEY" >&2
+    exit 1
+}
+
+echo "==> Signing DexBar $VERSION for Sparkle"
+SIG_ATTRS="$("$SIGN_UPDATE" --account "$SPARKLE_ACCOUNT" "$VERSIONED")"
+cp "$APPCAST" "$APPCAST_CANDIDATE"
+python3 "$ROOT/Scripts/appcast-add.py" \
+    --appcast "$APPCAST_CANDIDATE" \
+    --short-version "$VERSION" \
+    --version "$BUILD" \
+    --url "https://github.com/$REPO/releases/download/v$VERSION/DexBar-$VERSION.dmg" \
+    --sig-attrs "$SIG_ATTRS" \
+    --min-system "$(plist LSMinimumSystemVersion)" \
+    --link "https://github.com/$REPO/releases/tag/v$VERSION"
 
 if [ "${PUBLISH:-0}" != "1" ]; then
     cat <<EOF
 Release candidate verified and staged:
   $VERSIONED
   $CHECKSUM
+  $APPCAST_CANDIDATE
 
 To publish this exact candidate:
   PUBLISH=1 ./Scripts/release.sh
@@ -79,4 +111,18 @@ gh release create "v$VERSION" \
     --title "DexBar $VERSION" \
     "${NOTES[@]}"
 
+cp "$APPCAST_CANDIDATE" "$APPCAST"
+
+echo "==> Publishing the update feed"
+git -C "$ROOT" add appcast.xml
+git -C "$ROOT" commit -m "Publish DexBar $VERSION appcast"
+git -C "$ROOT" push "$REMOTE" "$BRANCH"
+
+LOCAL_HEAD="$(git -C "$ROOT" rev-parse HEAD)"
+git -C "$ROOT" fetch --quiet "$REMOTE" "$BRANCH"
+REMOTE_HEAD="$(git -C "$ROOT" rev-parse "$REMOTE/$BRANCH")"
+[ "$LOCAL_HEAD" = "$REMOTE_HEAD" ] \
+    || { echo "error: appcast commit did not reach $REMOTE/$BRANCH" >&2; exit 1; }
+
 echo "Published: https://github.com/$REPO/releases/tag/v$VERSION"
+echo "Update feed committed and pushed: $(plist SUFeedURL)"

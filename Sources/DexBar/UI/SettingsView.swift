@@ -34,6 +34,7 @@ struct SettingsView: View {
     }
 
     @ObservedObject var model: AppModel
+    @ObservedObject var updater: UpdaterController
     @ObservedObject var prefs = Preferences.shared
     @ObservedObject var hotKeys = HotKeyCenter.shared
     let openSignIn: () -> Void
@@ -44,8 +45,14 @@ struct SettingsView: View {
     @State private var notificationStatus: UNAuthorizationStatus?
     @State private var clearedHistory = false
 
-    init(model: AppModel, initialPane: Pane = .general, openSignIn: @escaping () -> Void) {
+    init(
+        model: AppModel,
+        updater: UpdaterController,
+        initialPane: Pane = .general,
+        openSignIn: @escaping () -> Void
+    ) {
         self.model = model
+        self.updater = updater
         self.openSignIn = openSignIn
         _selected = State(initialValue: initialPane)
     }
@@ -142,6 +149,16 @@ struct SettingsView: View {
                 }
                 if model.state == .needsAuthentication || model.state == .cliUnavailable {
                     Button("Open Terminal…", action: openSignIn).controlSize(.small)
+                }
+            }
+            group {
+                settingsRow(
+                    title: "Software updates",
+                    detail: "Checks once a day and asks before installing."
+                ) {
+                    Button("Check Now") { updater.checkForUpdates() }
+                        .controlSize(.small)
+                        .disabled(!updater.canCheck)
                 }
             }
         }

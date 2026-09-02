@@ -26,6 +26,17 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Victor Rodrigues. All rights reserved.</string>
+	<!-- Sparkle checks this public feed once per day and verifies every downloaded update
+	     with DexBar's dedicated EdDSA key. SUAutomaticallyUpdate is deliberately absent:
+	     users are told about updates and choose when to install them. -->
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/vmlrodrigues/DexBar/main/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>O6hYa2pRvI8l4UGruiuJbJvz1YXbAMt9VTzeXNP1hso=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSSupportsSuddenTermination</key>

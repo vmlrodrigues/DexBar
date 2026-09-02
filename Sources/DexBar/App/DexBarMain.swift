@@ -56,7 +56,15 @@ enum DexBarMain {
                 else if CommandLine.arguments.contains("--privacy") { pane = .privacy }
                 else if CommandLine.arguments.contains("--about") { pane = .about }
                 else { pane = .general }
-                render(view: SettingsView(model: model, initialPane: pane, openSignIn: {}), path: path)
+                render(
+                    view: SettingsView(
+                        model: model,
+                        updater: UpdaterController(),
+                        initialPane: pane,
+                        openSignIn: {}
+                    ),
+                    path: path
+                )
             }
             return
         }

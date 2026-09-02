@@ -1,5 +1,12 @@
 # DexBar
 
+![Platform](https://img.shields.io/badge/platform-macOS%2014.0%2B-brightgreen)
+![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-M1%2B-black?logo=apple&logoColor=white)
+![Notarised](https://img.shields.io/badge/Notarised-Developer%20ID-success)
+[![Latest release](https://img.shields.io/github/v/release/vmlrodrigues/DexBar?label=latest)](https://github.com/vmlrodrigues/DexBar/releases/latest)
+
+[![Download for Mac](https://img.shields.io/badge/Download_for_Mac-007AFF?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/vmlrodrigues/DexBar/releases/latest/download/DexBar.dmg)
+
 DexBar is a small, native macOS menu-bar app that shows the OpenAI Codex usage available to the ChatGPT account already signed in through Codex.
 
 It is built with SwiftUI and AppKit, has no web view, and does not appear in the Dock. The normal menu-bar display is deliberately quiet: it shows the weekly allowance, while a shorter window such as a five-hour cap appears only after Codex reports that window as active or reached.
@@ -27,6 +34,17 @@ The optional global shortcut uses macOS's Carbon hotkey registration. It receive
 - Apple silicon.
 - Codex CLI installed and signed in with ChatGPT.
 
+## Install
+
+1. [Download DexBar.dmg](https://github.com/vmlrodrigues/DexBar/releases/latest/download/DexBar.dmg).
+2. Open the disk image and drag DexBar to Applications.
+3. Launch DexBar. It will use the ChatGPT account already signed in through the Codex CLI.
+
+DexBar checks for updates once per day and prompts before installing them. You can also
+check immediately from **Settings → General → Software updates**. Update downloads are
+verified with a DexBar-specific EdDSA signature and Apple's code signature before they are
+installed.
+
 ## Build
 
 ```sh
@@ -43,13 +61,16 @@ DexBar follows the same guarded release path as ClawBar:
 ```sh
 ./Scripts/build.sh       # Developer ID signing
 ./Scripts/notarize.sh    # notarise and staple the app and DMG
-./Scripts/release.sh     # verify source/artifact/remote identity; stage assets
-PUBLISH=1 ./Scripts/release.sh
+./Scripts/release.sh     # verify, sign the update, and stage release assets/appcast
+PUBLISH=1 ./Scripts/release.sh  # publish the GitHub release and update appcast.xml
 ```
 
 Copy `.env.example` to `.env` first and provide an App Store Connect API key. The release guard refuses dirty source, duplicate versions, mismatched Git-derived build numbers, unpushed commits, unsigned artifacts, and unstapled artifacts. Published releases include a versioned DMG, a stable latest-download DMG, and a SHA-256 checksum.
 
-Version 0.1 uses GitHub Releases for updates; DexBar does not silently install updates.
+The release is published before the script commits and pushes `appcast.xml`, so Sparkle
+never sees an enclosure URL that still returns 404. Publication succeeds only after the
+appcast commit is verified on the remote branch. The feed points Sparkle at the versioned,
+notarised GitHub release asset.
 
 ## Project layout
 
@@ -62,4 +83,6 @@ DexBar is an independent, unofficial tool. It is not made or endorsed by OpenAI.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Sparkle's complete licence and bundled third-party notices
+are retained in [Resources/ThirdPartyLicenses/Sparkle-LICENSE.txt](Resources/ThirdPartyLicenses/Sparkle-LICENSE.txt)
+and included in the application bundle.

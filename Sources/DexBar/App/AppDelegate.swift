@@ -12,6 +12,7 @@ final class EscapeClosableWindow: NSWindow {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = AppModel()
+    private let updater = UpdaterController()
     private var statusItem: StatusItemController!
     private var scheduler: PollScheduler!
     private var activityMonitor: ActivityMonitor?
@@ -183,7 +184,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showSettings() {
         if let settingsWindow { raise(settingsWindow); return }
-        let view = SettingsView(model: model, openSignIn: { [weak self] in self?.openTerminalForSignIn() })
+        let view = SettingsView(
+            model: model,
+            updater: updater,
+            openSignIn: { [weak self] in self?.openTerminalForSignIn() }
+        )
         settingsWindow = presentWindow(title: "DexBar Settings", view: view)
     }
 

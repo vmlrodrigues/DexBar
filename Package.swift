@@ -8,6 +8,9 @@ let package = Package(
         .executable(name: "DexBar", targets: ["DexBar"]),
         .library(name: "DexBarCore", targets: ["DexBarCore"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.5"),
+    ],
     targets: [
         .target(
             name: "DexBarCore",
@@ -16,9 +19,18 @@ let package = Package(
         ),
         .executableTarget(
             name: "DexBar",
-            dependencies: ["DexBarCore"],
+            dependencies: [
+                "DexBarCore",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
             path: "Sources/DexBar",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@executable_path/../Frameworks",
+                ]),
+            ]
         ),
         .testTarget(
             name: "DexBarCoreTests",

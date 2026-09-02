@@ -15,6 +15,13 @@ Verification updated on 2 September 2026.
 - A hostile app-server fixture that floods stderr and ignores termination is force-killed within the configured deadline.
 - Carbon global-hotkey support and its local shortcut recorder compile without adding an Accessibility entitlement or permission prompt.
 - The non-visual shortcut self-check successfully registers and releases a temporary Carbon hotkey through the production registration path.
+- Sparkle 2.9.5 resolves and links through the packaged app's Frameworks rpath.
+- The packaged Info.plist enables automatic checks at an 86,400-second interval, points at the public DexBar appcast, and contains the matching DexBar EdDSA public key.
+- The DexBar-specific private key was read back from the login Keychain through Sparkle's public-key command and successfully signed an existing disk image.
+- The release guard compares that Keychain account's public key with `SUPublicEDKey` before signing an update.
+- The appcast generator produces valid XML and an idempotent signed release entry; all release shell scripts pass syntax checking.
+- Sparkle's complete licence and bundled third-party notices are retained in source and copied into the application bundle.
+- A Developer ID build signs Sparkle's Installer and Downloader XPC services, Autoupdate helper, Updater app, framework, and DexBar in inside-out order; strict deep signature validation passes.
 - Static renders were inspected in current, active-window, warning, critical, stale, authentication, dark-mode, onboarding, and settings states.
 - The packaged app ran hidden at 0.0% sampled CPU and a 26 MB `phys_footprint` (27 MB peak) after its first refresh.
 
@@ -27,10 +34,11 @@ Verification updated on 2 September 2026.
 - Popover buttons: explicitly excluded from keyboard focus and focus-effect rendering while retaining native button accessibility actions.
 - Menu Bar Settings: shortcut enablement, recorder, clear action, registration status, and permission explanation fit without clipping.
 - Settings: native semantic typography and all controls fit without clipping in the 620 × 420 window.
+- General Settings: the compact Software updates row fits without clipping and states the daily, confirmation-before-install behaviour.
 - Onboarding: explains the existing Codex sign-in and local history before enabling alerts.
 
 The native hidden-launch check confirmed that the packaged process stayed responsive and exposed only hidden window-server surfaces. Offsider pixel capture and accessibility inspection were unavailable because the host had not granted those permissions and its display was asleep; visual verification therefore used DexBar's own offscreen renderer.
 
 ## Release notes
 
-`Scripts/build.sh`, `Scripts/notarize.sh`, and `Scripts/release.sh` provide Developer ID signing, two-stage notarisation and stapling, DMG packaging, Gatekeeper assessment, source/build/remote identity checks, and explicit GitHub publication. A public candidate must pass that complete path; `SIGN=0` output remains local-only.
+`Scripts/build.sh`, `Scripts/notarize.sh`, and `Scripts/release.sh` provide Developer ID signing (including Sparkle's nested services), two-stage notarisation and stapling, DMG packaging, Gatekeeper assessment, EdDSA update signing, appcast generation, source/build/remote identity checks, and explicit GitHub publication. A public candidate must pass that complete path; `SIGN=0` output remains local-only. The generated appcast is committed only after its corresponding GitHub release exists, pushed automatically, and verified on the remote branch before publication reports success.

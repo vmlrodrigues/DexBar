@@ -34,7 +34,7 @@ IDENTITY="${RELEASE_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>
 [ -f "$NOTARY_KEY" ] || { echo "error: NOTARY_KEY file not found: $NOTARY_KEY" >&2; exit 1; }
 
 echo "==> Verifying the app signature"
-codesign --verify --strict --verbose=2 "$APP"
+codesign --verify --strict --deep --verbose=2 "$APP"
 
 ZIP="$DIST/$APP_NAME-app.zip"
 echo "==> [1/2] Notarising the app"
