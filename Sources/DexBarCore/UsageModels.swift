@@ -77,10 +77,34 @@ public struct UsageCredits: Equatable, Codable, Sendable {
     }
 }
 
+public enum UsageServiceTier: String, Codable, Equatable, Sendable {
+    case standard
+    case fast
+    case ultrafast
+
+    public init?(appServerValue: String?) {
+        switch appServerValue?.lowercased() {
+        case nil, "auto", "default", "standard": self = .standard
+        case "fast", "priority": self = .fast
+        case "ultrafast": self = .ultrafast
+        default: return nil
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .standard: return "Standard"
+        case .fast: return "Fast"
+        case .ultrafast: return "Ultra Fast"
+        }
+    }
+}
+
 public struct UsageSnapshot: Equatable, Sendable {
     public let weekly: UsageWindow
     public let supplementary: [UsageWindow]
     public let planType: String?
+    public let serviceTier: UsageServiceTier?
     public let credits: UsageCredits?
     public let resetCreditsAvailable: Int
     public let fetchedAt: Date
@@ -89,6 +113,7 @@ public struct UsageSnapshot: Equatable, Sendable {
         weekly: UsageWindow,
         supplementary: [UsageWindow],
         planType: String?,
+        serviceTier: UsageServiceTier? = nil,
         credits: UsageCredits?,
         resetCreditsAvailable: Int,
         fetchedAt: Date
@@ -96,6 +121,7 @@ public struct UsageSnapshot: Equatable, Sendable {
         self.weekly = weekly
         self.supplementary = supplementary
         self.planType = planType
+        self.serviceTier = serviceTier
         self.credits = credits
         self.resetCreditsAvailable = resetCreditsAvailable
         self.fetchedAt = fetchedAt
@@ -150,6 +176,18 @@ struct AppServerRateLimitsPayload: Decodable {
     let planType: String?
 }
 
+struct AppServerConfigReadPayload: Decodable {
+    struct Config: Decodable {
+        let serviceTier: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case serviceTier = "service_tier"
+        }
+    }
+
+    let config: Config
+}
+
 enum UsageMappingError: LocalizedError {
     case noRateLimits
 
@@ -159,7 +197,11 @@ enum UsageMappingError: LocalizedError {
 }
 
 enum UsageMapper {
-    static func snapshot(from payload: AppServerRateLimitsPayload, now: Date) throws -> UsageSnapshot {
+    static func snapshot(
+        from payload: AppServerRateLimitsPayload,
+        serviceTier: UsageServiceTier? = nil,
+        now: Date
+    ) throws -> UsageSnapshot {
         var buckets = payload.rateLimitsByLimitId ?? [:]
         if buckets.isEmpty, let single = payload.rateLimits {
             buckets[single.limitId] = single
@@ -205,6 +247,7 @@ enum UsageMapper {
             weekly: weekly,
             supplementary: supplementary,
             planType: general.planType ?? payload.planType,
+            serviceTier: serviceTier,
             credits: credits,
             resetCreditsAvailable: payload.rateLimitResetCredits?.availableCount ?? 0,
             fetchedAt: now

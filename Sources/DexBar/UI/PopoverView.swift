@@ -27,13 +27,17 @@ struct PopoverView: View {
             AppMark(size: 30)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    Text("DexBar").font(.system(size: 13, weight: .semibold))
-                    if let plan = displayPlan(model.snapshot?.planType) {
-                        Text(plan)
+                    Text("DexBar")
+                        .font(.system(size: 13, weight: .semibold))
+                        .fixedSize()
+                    if let accountBadge {
+                        Text(accountBadge)
                             .font(.system(size: 9, weight: .medium))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(.secondary.opacity(0.12), in: Capsule())
+                            .help("ChatGPT plan and Codex default service mode reported by the local app server.")
+                            .fixedSize()
                     }
                 }
                 Text("Codex usage").font(.system(size: 10)).foregroundStyle(.secondary)
@@ -51,6 +55,14 @@ struct PopoverView: View {
             .mouseOnlyPopoverControl()
         }
         .padding(14)
+    }
+
+    private var accountBadge: String? {
+        let plan = displayPlan(model.snapshot?.planType)
+        let speed = model.snapshot?.serviceTier?.displayName
+        return [plan, speed].compactMap { $0 }.isEmpty
+            ? nil
+            : [plan, speed].compactMap { $0 }.joined(separator: " · ")
     }
 
     @ViewBuilder
@@ -91,6 +103,7 @@ struct PopoverView: View {
                     }
                 }
                 .padding(14)
+                .frame(maxWidth: .infinity)
 
                 if let credits = snapshot.credits, credits.isWorthShowing {
                     Divider()
@@ -147,6 +160,7 @@ struct PopoverView: View {
                 Text(freshnessText)
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
+                    .fixedSize()
             }
             Spacer()
             Button(action: openSettings) { Image(systemName: "gearshape") }

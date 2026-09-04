@@ -41,7 +41,8 @@ final class AppModel: ObservableObject {
         if usesPreviewProjection {
             return window.id == snapshot?.weekly.id ? previewProjection : nil
         }
-        return projectionStore.projection(for: window)
+        guard let snapshot else { return nil }
+        return projectionStore.projection(for: window, now: snapshot.fetchedAt)
     }
 
     var worstPercent: Int { snapshot?.worstPercent ?? 0 }
@@ -89,7 +90,7 @@ final class AppModel: ObservableObject {
         state: LoadState = .ok,
         projection: Projection? = nil
     ) -> AppModel {
-        let model = AppModel()
+        let model = AppModel(projectionStore: .inMemory())
         model.snapshot = snapshot
         model.state = state
         model.usesPreviewProjection = true

@@ -109,6 +109,287 @@ final class DexBarCoreTests: XCTestCase {
         XCTAssertEqual(projection?.daysRemaining ?? 0, 3, accuracy: 0.001)
     }
 
+    func testWeeklyProjectionBlendsQualifiedRecentPaceWithWindowAverage() {
+        let reset = now.addingTimeInterval(3.5 * 86_400)
+        let window = UsageWindow(
+            id: "codex.primary",
+            bucketID: "codex",
+            bucketName: "General",
+            usedPercent: 8,
+            durationMinutes: 10_080,
+            resetsAt: reset
+        )
+        let baseline = ProjectionSample(
+            windowID: window.id,
+            timestamp: now.addingTimeInterval(-3.5 * 86_400),
+            usedPercent: 1,
+            resetsAt: reset
+        )
+        let recent = ProjectionSample(
+            windowID: window.id,
+            timestamp: now.addingTimeInterval(-12 * 3_600),
+            usedPercent: 4,
+            resetsAt: reset
+        )
+
+        let projection = ProjectionCalculator.calculate(
+            window: window,
+            samples: [baseline, recent],
+            now: now
+        )
+
+        XCTAssertEqual(projection?.longTermPointsPerDay ?? 0, 2, accuracy: 0.001)
+        XCTAssertEqual(projection?.recentPointsPerDay ?? 0, 8, accuracy: 0.001)
+        XCTAssertEqual(projection?.pointsPerDay ?? 0, 4.4, accuracy: 0.001)
+        XCTAssertEqual(projection?.projectedPercent, 23)
+        XCTAssertEqual(projection?.lowerProjectedPercent, 13)
+        XCTAssertEqual(projection?.upperProjectedPercent, 38)
+    }
+
+    func testRecentPaceRequiresThreePointsOverAtLeastSixHours() {
+        let reset = now.addingTimeInterval(3 * 86_400)
+        let window = UsageWindow(
+            id: "codex.primary",
+            bucketID: "codex",
+            bucketName: "General",
+            usedPercent: 8,
+            durationMinutes: 10_080,
+            resetsAt: reset
+        )
+        let baseline = ProjectionSample(
+            windowID: window.id,
+            timestamp: now.addingTimeInterval(-3 * 86_400),
+            usedPercent: 0,
+            resetsAt: reset
+        )
+        let tooLittleMovement = ProjectionSample(
+            windowID: window.id,
+            timestamp: now.addingTimeInterval(-12 * 3_600),
+            usedPercent: 6,
+            resetsAt: reset
+        )
+        let tooRecent = ProjectionSample(
+            windowID: window.id,
+            timestamp: now.addingTimeInterval(-3 * 3_600),
+            usedPercent: 4,
+            resetsAt: reset
+        )
+
+        let tooSmallProjection = ProjectionCalculator.calculate(
+            window: window,
+            samples: [baseline, tooLittleMovement],
+            now: now
+        )
+        let tooShortProjection = ProjectionCalculator.calculate(
+            window: window,
+            samples: [baseline, tooRecent],
+            now: now
+        )
+
+        XCTAssertNil(tooSmallProjection?.recentPointsPerDay)
+        XCTAssertNil(tooShortProjection?.recentPointsPerDay)
+        XCTAssertEqual(tooSmallProjection?.pointsPerDay ?? 0, 8.0 / 3.0, accuracy: 0.001)
+        XCTAssertEqual(tooShortProjection?.pointsPerDay ?? 0, 8.0 / 3.0, accuracy: 0.001)
+    }
+
+    func testRecentProjectionMovesSmoothlyAcrossAWholePointUpdate() throws {
+        let reset = now.addingTimeInterval(3 * 86_400)
+        let windowAtEight = UsageWindow(
+            id: "codex.primary",
+            bucketID: "codex",
+            bucketName: "General",
+            usedPercent: 8,
+            durationMinutes: 10_080,
+            resetsAt: reset
+        )
+        let samples = [
+            ProjectionSample(
+                windowID: windowAtEight.id,
+                timestamp: now.addingTimeInterval(-3 * 86_400),
+                usedPercent: 1,
+                resetsAt: reset
+            ),
+            ProjectionSample(
+                windowID: windowAtEight.id,
+                timestamp: now.addingTimeInterval(-15 * 3_600),
+                usedPercent: 4,
+                resetsAt: reset
+            ),
+            ProjectionSample(
+                windowID: windowAtEight.id,
+                timestamp: now.addingTimeInterval(-12 * 3_600),
+                usedPercent: 5,
+                resetsAt: reset
+            ),
+            ProjectionSample(
+                windowID: windowAtEight.id,
+                timestamp: now.addingTimeInterval(-9 * 3_600),
+                usedPercent: 6,
+                resetsAt: reset
+            ),
+            ProjectionSample(
+                windowID: windowAtEight.id,
+                timestamp: now.addingTimeInterval(-4 * 3_600),
+                usedPercent: 7,
+                resetsAt: reset
+            ),
+            ProjectionSample(
+                windowID: windowAtEight.id,
+                timestamp: now.addingTimeInterval(-3_600),
+                usedPercent: 8,
+                resetsAt: reset
+            ),
+        ]
+
+        let projectionAtEight = ProjectionCalculator.calculate(
+            window: windowAtEight,
+            samples: samples,
+            now: now
+        )
+        let tenMinutesLater = now.addingTimeInterval(10 * 60)
+        let windowAtNine = UsageWindow(
+            id: windowAtEight.id,
+            bucketID: windowAtEight.bucketID,
+            bucketName: windowAtEight.bucketName,
+            usedPercent: 9,
+            durationMinutes: windowAtEight.durationMinutes,
+            resetsAt: reset
+        )
+        let projectionAtNine = ProjectionCalculator.calculate(
+            window: windowAtNine,
+            samples: samples + [ProjectionSample(
+                windowID: windowAtEight.id,
+                timestamp: now,
+                usedPercent: 8,
+                resetsAt: reset
+            )],
+            now: tenMinutesLater
+        )
+
+        let step = try XCTUnwrap(projectionAtNine?.projectedPercent)
+            - (try XCTUnwrap(projectionAtEight?.projectedPercent))
+        XCTAssertGreaterThan(step, 0)
+        XCTAssertLessThanOrEqual(step, 6)
+    }
+
+    func testWholePointUncertaintyPreventsFalseConfidenceNearLimit() {
+        let reset = now.addingTimeInterval(2 * 86_400)
+        let window = UsageWindow(
+            id: "codex.primary",
+            bucketID: "codex",
+            bucketName: "General",
+            usedPercent: 50,
+            durationMinutes: 10_080,
+            resetsAt: reset
+        )
+        let baseline = ProjectionSample(
+            windowID: window.id,
+            timestamp: now.addingTimeInterval(-2 * 86_400),
+            usedPercent: 1,
+            resetsAt: reset
+        )
+
+        let projection = ProjectionCalculator.calculate(window: window, samples: [baseline], now: now)
+        XCTAssertEqual(projection?.projectedPercent, 99)
+        XCTAssertEqual(projection?.lowerProjectedPercent, 97)
+        XCTAssertEqual(projection?.upperProjectedPercent, 101)
+        XCTAssertEqual(projection?.outlook, .mayRunOut)
+    }
+
+    func testProjectionAcceptsSmallResetTimestampJitter() {
+        let reset = now.addingTimeInterval(3 * 86_400)
+        let window = UsageWindow(
+            id: "codex.primary",
+            bucketID: "codex",
+            bucketName: "General",
+            usedPercent: 40,
+            durationMinutes: 10_080,
+            resetsAt: reset
+        )
+        let baseline = ProjectionSample(
+            windowID: window.id,
+            timestamp: now.addingTimeInterval(-2 * 86_400),
+            usedPercent: 10,
+            resetsAt: reset.addingTimeInterval(30)
+        )
+
+        XCTAssertEqual(
+            ProjectionCalculator.calculate(window: window, samples: [baseline], now: now)?.projectedPercent,
+            85
+        )
+    }
+
+    func testServiceTierNormalizesAppServerValues() throws {
+        XCTAssertEqual(UsageServiceTier(appServerValue: nil), .standard)
+        XCTAssertEqual(UsageServiceTier(appServerValue: "auto"), .standard)
+        XCTAssertEqual(UsageServiceTier(appServerValue: "default"), .standard)
+        XCTAssertEqual(UsageServiceTier(appServerValue: "fast"), .fast)
+        XCTAssertEqual(UsageServiceTier(appServerValue: "priority"), .fast)
+        XCTAssertEqual(UsageServiceTier(appServerValue: "ultrafast"), .ultrafast)
+        XCTAssertNil(UsageServiceTier(appServerValue: "future-tier"))
+
+        let data = Data(#"{"config":{"service_tier":"priority"}}"#.utf8)
+        let payload = try JSONDecoder().decode(AppServerConfigReadPayload.self, from: data)
+        XCTAssertEqual(UsageServiceTier(appServerValue: payload.config.serviceTier), .fast)
+    }
+
+    @MainActor
+    func testProjectionStoreCompactsLegacyTenMinuteHeartbeats() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DexBarProjection-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let reset = now.addingTimeInterval(3 * 86_400)
+        var samples = (0...6).map { index in
+            ProjectionSample(
+                windowID: "codex.primary",
+                timestamp: now.addingTimeInterval(TimeInterval(index * 10 * 60)),
+                usedPercent: 1,
+                resetsAt: reset
+            )
+        }
+        samples.append(ProjectionSample(
+            windowID: "codex.primary",
+            timestamp: now.addingTimeInterval(70 * 60),
+            usedPercent: 2,
+            resetsAt: reset
+        ))
+        samples.append(ProjectionSample(
+            windowID: "codex.primary",
+            timestamp: now.addingTimeInterval(80 * 60),
+            usedPercent: 2,
+            resetsAt: reset
+        ))
+        try JSONEncoder().encode(samples).write(to: url)
+
+        _ = ProjectionStore(url: url)
+
+        let compacted = try JSONDecoder().decode(
+            [ProjectionSample].self,
+            from: Data(contentsOf: url)
+        )
+        XCTAssertEqual(compacted.map(\.usedPercent), [1, 1, 2])
+        XCTAssertEqual(compacted.count, 3)
+    }
+
+    func testProjectionSampleDecodesLegacyServiceTierField() throws {
+        let sample = ProjectionSample(
+            windowID: "codex.primary",
+            timestamp: now,
+            usedPercent: 4,
+            resetsAt: now.addingTimeInterval(86_400)
+        )
+        var object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(sample)) as? [String: Any]
+        )
+        object["serviceTier"] = "fast"
+
+        let decoded = try JSONDecoder().decode(
+            ProjectionSample.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+        XCTAssertEqual(decoded, sample)
+    }
+
     func testShortProjectionWaitsAnHourAndStaysQuietBelowSixtyPercent() {
         let reset = now.addingTimeInterval(2 * 3_600)
         let window = UsageWindow(
@@ -160,6 +441,35 @@ final class DexBarCoreTests: XCTestCase {
             now: now,
             kind: .short
         ))
+    }
+
+    func testShortProjectionUsesUncertaintyBandNearLimit() {
+        let reset = now.addingTimeInterval(2 * 3_600)
+        let window = UsageWindow(
+            id: "codex.short",
+            bucketID: "codex",
+            bucketName: "General",
+            usedPercent: 50,
+            durationMinutes: 300,
+            resetsAt: reset
+        )
+        let baseline = ProjectionSample(
+            windowID: window.id,
+            timestamp: now.addingTimeInterval(-2 * 3_600),
+            usedPercent: 1,
+            resetsAt: reset
+        )
+
+        let projection = ProjectionCalculator.calculate(
+            window: window,
+            samples: [baseline],
+            now: now,
+            kind: .short
+        )
+        XCTAssertEqual(projection?.projectedPercent, 99)
+        XCTAssertEqual(projection?.lowerProjectedPercent, 97)
+        XCTAssertEqual(projection?.upperProjectedPercent, 101)
+        XCTAssertEqual(projection?.outlook, .mayRunOut)
     }
 
     func testNotificationLedgerUsesRawPercentAndSurvivesRelaunchAndResetJitter() throws {
@@ -252,6 +562,59 @@ final class DexBarCoreTests: XCTestCase {
             XCTFail("Expected timeout, received \(error)")
         }
         XCTAssertLessThan(Date().timeIntervalSince(started), 1.5)
+    }
+
+    func testClientReportsFastWhenConfigArrivesBeforeUsage() async throws {
+        let fixture = try appServerFixture(responses: [
+            #"{"id":2,"result":{"config":{"service_tier":"priority"}}}"#,
+            try rateLimitResponseLine(),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let snapshot = try await CodexAppServerClient(
+            executableURL: fixture.executable,
+            requestTimeout: 1,
+            terminationGrace: 0.1
+        ).fetch(now: now)
+
+        XCTAssertEqual(snapshot.serviceTier, .fast)
+        XCTAssertEqual(snapshot.weekly.id, "codex.primary")
+    }
+
+    func testClientReturnsUsageWithoutWaitingForOptionalConfig() async throws {
+        let fixture = try appServerFixture(
+            responses: [try rateLimitResponseLine()],
+            keepAlive: true
+        )
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let started = Date()
+        let snapshot = try await CodexAppServerClient(
+            executableURL: fixture.executable,
+            requestTimeout: 1,
+            terminationGrace: 0.1
+        ).fetch(now: now)
+
+        XCTAssertNil(snapshot.serviceTier)
+        XCTAssertEqual(snapshot.weekly.id, "codex.primary")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.9)
+    }
+
+    func testClientIgnoresOptionalConfigError() async throws {
+        let fixture = try appServerFixture(responses: [
+            #"{"id":2,"error":{"message":"optional metadata unavailable"}}"#,
+            try rateLimitResponseLine(),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let snapshot = try await CodexAppServerClient(
+            executableURL: fixture.executable,
+            requestTimeout: 1,
+            terminationGrace: 0.1
+        ).fetch(now: now)
+
+        XCTAssertNil(snapshot.serviceTier)
+        XCTAssertEqual(snapshot.weekly.id, "codex.primary")
     }
 
     func testDurationFormattingUsesDaysThenHours() {
@@ -360,5 +723,51 @@ final class DexBarCoreTests: XCTestCase {
             "windowDurationMins": minutes,
             "resetsAt": Int(now.addingTimeInterval(TimeInterval(minutes * 60)).timeIntervalSince1970),
         ]
+    }
+
+    private func rateLimitResponseLine() throws -> String {
+        let result = try XCTUnwrap(
+            try JSONSerialization.jsonObject(
+                with: payloadData(generalWeekly: 9, sparkShort: 0, sparkWeekly: 0)
+            ) as? [String: Any]
+        )
+        let response: [String: Any] = ["id": 3, "result": result]
+        return try XCTUnwrap(
+            String(data: JSONSerialization.data(withJSONObject: response), encoding: .utf8)
+        )
+    }
+
+    private func appServerFixture(
+        responses: [String],
+        keepAlive: Bool = false
+    ) throws -> (directory: URL, executable: URL) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DexBarFixture-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let executable = directory.appendingPathComponent("codex-fixture")
+        let responseCommands = responses
+            .map { "printf '%s\\n' \(shellSingleQuoted($0))" }
+            .joined(separator: "\n")
+        let keepAliveCommand = keepAlive ? "while :; do sleep 1; done" : ""
+        let script = """
+        #!/bin/sh
+        IFS= read -r initialize
+        printf '%s\n' '{"id":1,"result":{}}'
+        IFS= read -r initialized
+        IFS= read -r config_request
+        IFS= read -r rate_limit_request
+        \(responseCommands)
+        \(keepAliveCommand)
+        """
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executable.path
+        )
+        return (directory, executable)
+    }
+
+    private func shellSingleQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
 }

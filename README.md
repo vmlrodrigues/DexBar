@@ -16,7 +16,8 @@ It is built with SwiftUI and AppKit, has no web view, and does not appear in the
 ## What it shows
 
 - Weekly usage, percentage used, time until reset, and the exact reset date.
-- A weekly projection after one day of history, plus a quiet short-window projection after one hour when it is heading to at least 60%.
+- An adaptive weekly projection after one day of history, plus a quiet short-window projection after one hour when it is heading to at least 60%.
+- The ChatGPT plan and Codex default service mode when the local app server reports them.
 - Active shorter windows and urgent model-specific limits only when they matter.
 - An optional global shortcut to show or hide the popover from any app, configurable in Menu Bar Settings.
 - Optional notifications at 80%, 95%, and when the weekly projection crosses 100%.
@@ -24,7 +25,7 @@ It is built with SwiftUI and AppKit, has no web view, and does not appear in the
 
 ## Privacy
 
-DexBar starts the installed Codex CLI's local app server and asks it for account rate limits. It reuses the Codex sign-in but does not read or copy Codex credentials into its own files. It stores only usage percentages, timestamps, and reset dates for projection. It never sends a prompt to check usage.
+DexBar starts the installed Codex CLI's local app server and asks it for account rate limits and the effective default service mode. It reuses the Codex sign-in but does not read or copy Codex credentials into its own files. It stores only usage percentages, timestamps, and reset dates for projection. Service mode is display-only and is not written to projection history. DexBar never sends a prompt to check usage.
 
 The optional global shortcut uses macOS's Carbon hotkey registration. It receives only the chosen combination and does not require Accessibility permission. The shortcut ships disabled and unbound so DexBar does not claim a system-wide key combination without being asked.
 
@@ -76,7 +77,7 @@ notarised GitHub release asset.
 
 - `Sources/DexBarCore` contains the Codex app-server client, response mapping, formatting, and projection logic.
 - `Sources/DexBar` contains the AppKit lifecycle and menu-bar plumbing plus SwiftUI views.
-- `Tests/DexBarCoreTests` covers window visibility, health thresholds, weekly and short-window projection, and formatting.
+- `Tests/DexBarCoreTests` covers window visibility, health thresholds, adaptive and short-window projection, service-mode mapping, and formatting.
 - `Scripts/build.sh` assembles the standalone `.app` bundle.
 
 DexBar is an independent, unofficial tool. It is not made or endorsed by OpenAI.

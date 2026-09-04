@@ -308,7 +308,11 @@ struct SettingsView: View {
         case .needsAuthentication: return "Codex needs you to sign in again."
         case .cliUnavailable: return "Codex CLI was not found."
         case .failed(let message): return message
-        default: return "Uses the existing Codex CLI sign-in."
+        default:
+            if let mode = model.snapshot?.serviceTier?.displayName {
+                return "Uses the existing Codex CLI sign-in. Default service mode: \(mode)."
+            }
+            return "Uses the existing Codex CLI sign-in."
         }
     }
 

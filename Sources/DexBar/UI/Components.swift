@@ -131,10 +131,30 @@ struct UsageMeter: View {
     }
 
     private func projectionDetail(_ projection: Projection) -> String {
-        var lines = [String(
-            format: "Projected from %.1f percentage points per day since the counter last reset.",
-            projection.pointsPerDay
-        )]
+        var lines: [String]
+        if let recent = projection.recentPointsPerDay {
+            lines = [String(
+                format: "Blends a smoothed recent pace (%.1f points/day) with the window average (%.1f points/day).",
+                recent,
+                projection.longTermPointsPerDay
+            )]
+            lines.append(
+                "Those paces plus whole-point measurement uncertainty project "
+                    + "\(projection.lowerProjectedPercent)–\(projection.upperProjectedPercent)%; the marker uses the blend."
+            )
+        } else {
+            lines = [String(
+                format: "Projected from the window average of %.1f percentage points per day.",
+                projection.longTermPointsPerDay
+            )]
+            lines.append(
+                "Whole-point measurement uncertainty gives a range of "
+                    + "\(projection.lowerProjectedPercent)–\(projection.upperProjectedPercent)%."
+            )
+            if window.isWeekly {
+                lines.append("A recent trend needs at least 3 percentage points measured over 6–24 hours.")
+            }
+        }
         if let reachedAt = projection.limitReachedAt {
             let formatter = DateFormatter()
             formatter.dateFormat = DateFormatter.dateFormat(
@@ -149,7 +169,6 @@ struct UsageMeter: View {
         case .mayRunOut: lines.append("Close enough to the limit that it could go either way.")
         case .likelyToRunOut: lines.append("Heading over the limit before this window resets.")
         }
-        lines.append("Accuracy falls off with distance—roughly 1.5 points per day projected.")
         return lines.joined(separator: "\n")
     }
 }

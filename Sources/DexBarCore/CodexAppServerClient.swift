@@ -42,6 +42,11 @@ public enum CodexCLI {
     }
 }
 
+private struct AppServerReadResult {
+    let rateLimits: AppServerRateLimitsPayload
+    let serviceTier: UsageServiceTier?
+}
+
 public struct CodexAppServerClient: Sendable {
     private let executableURL: URL?
     private let requestTimeout: TimeInterval
@@ -49,7 +54,7 @@ public struct CodexAppServerClient: Sendable {
 
     public init(
         executableURL: URL? = CodexCLI.executableURL,
-        requestTimeout: TimeInterval = 12,
+        requestTimeout: TimeInterval = 15,
         terminationGrace: TimeInterval = 1
     ) {
         self.executableURL = executableURL
@@ -66,14 +71,18 @@ public struct CodexAppServerClient: Sendable {
                 terminationGrace: terminationGrace
             )
         }.value
-        return try UsageMapper.snapshot(from: payload, now: now)
+        return try UsageMapper.snapshot(
+            from: payload.rateLimits,
+            serviceTier: payload.serviceTier,
+            now: now
+        )
     }
 
     private static func readPayload(
         executableURL: URL,
         requestTimeout: TimeInterval,
         terminationGrace: TimeInterval
-    ) throws -> AppServerRateLimitsPayload {
+    ) throws -> AppServerReadResult {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = ["app-server", "--listen", "stdio://"]
@@ -118,10 +127,15 @@ public struct CodexAppServerClient: Sendable {
                     let line = buffer[..<newline.lowerBound]
                     buffer.removeSubrange(...newline.lowerBound)
                     guard !line.isEmpty else { continue }
-                    if let text = String(data: line, encoding: .utf8) {
-                        protocolLines.append(text)
+                    let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any]
+                    if ProcessInfo.processInfo.environment["DEXBAR_DEBUG_PROTOCOL"] == "1",
+                       protocolLines.count < 64,
+                       let object {
+                        let id = (object["id"] as? NSNumber)?.stringValue ?? "notification"
+                        let keys = object.keys.sorted().joined(separator: ",")
+                        protocolLines.append("response id=\(id) keys=\(keys)")
                     }
-                    return try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any]
+                    return object
                 }
                 let chunk = output.fileHandleForReading.availableData
                 guard !chunk.isEmpty else { return nil }
@@ -163,28 +177,42 @@ public struct CodexAppServerClient: Sendable {
 
         try send([
             ["method": "initialized", "params": [:]],
-            ["method": "account/rateLimits/read", "id": 2],
+            ["method": "config/read", "id": 2, "params": ["includeLayers": false]],
+            ["method": "account/rateLimits/read", "id": 3],
         ])
 
+        var serviceTier: UsageServiceTier?
         while let object = nextObject() {
-            guard let id = object["id"] as? NSNumber, id.intValue == 2 else { continue }
-            if let error = object["error"] as? [String: Any] {
-                let message = error["message"] as? String ?? "Codex could not read account limits."
-                if message.localizedCaseInsensitiveContains("auth")
-                    || message.localizedCaseInsensitiveContains("login") {
-                    throw CodexClientError.authenticationRequired
+            guard let id = object["id"] as? NSNumber else { continue }
+            switch id.intValue {
+            case 2:
+                guard object["error"] == nil, let result = object["result"],
+                      let data = try? JSONSerialization.data(withJSONObject: result),
+                      let payload = try? JSONDecoder().decode(AppServerConfigReadPayload.self, from: data)
+                else { continue }
+                serviceTier = UsageServiceTier(appServerValue: payload.config.serviceTier)
+            case 3:
+                if let error = object["error"] as? [String: Any] {
+                    let message = error["message"] as? String ?? "Codex could not read account limits."
+                    if message.localizedCaseInsensitiveContains("auth")
+                        || message.localizedCaseInsensitiveContains("login") {
+                        throw CodexClientError.authenticationRequired
+                    }
+                    throw CodexClientError.server(message)
                 }
-                throw CodexClientError.server(message)
-            }
-            guard let result = object["result"] else { throw CodexClientError.malformedResponse }
-            let data = try JSONSerialization.data(withJSONObject: result)
-            do {
-                if controller.didTimeOut { throw CodexClientError.timeout }
-                return try JSONDecoder().decode(AppServerRateLimitsPayload.self, from: data)
-            }
-            catch let error as CodexClientError { throw error }
-            catch {
-                throw CodexClientError.server("Codex usage response changed shape: \(error.localizedDescription)")
+                guard let result = object["result"] else { throw CodexClientError.malformedResponse }
+                let data = try JSONSerialization.data(withJSONObject: result)
+                do {
+                    let rateLimits = try JSONDecoder().decode(AppServerRateLimitsPayload.self, from: data)
+                    if controller.didTimeOut { throw CodexClientError.timeout }
+                    return AppServerReadResult(rateLimits: rateLimits, serviceTier: serviceTier)
+                } catch let error as CodexClientError {
+                    throw error
+                } catch {
+                    throw CodexClientError.server("Codex usage response changed shape: \(error.localizedDescription)")
+                }
+            default:
+                continue
             }
         }
 
@@ -203,7 +231,7 @@ public struct CodexAppServerClient: Sendable {
         }
         if ProcessInfo.processInfo.environment["DEXBAR_DEBUG_PROTOCOL"] == "1",
            !protocolLines.isEmpty {
-            throw CodexClientError.server("No rate-limit result. Protocol output: \(protocolLines.joined(separator: "\n").prefix(2_000))")
+            throw CodexClientError.server("No rate-limit result. Protocol summary: \(protocolLines.joined(separator: "\n").prefix(2_000))")
         }
         throw CodexClientError.malformedResponse
     }

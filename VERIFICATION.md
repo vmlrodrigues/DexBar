@@ -1,18 +1,18 @@
 # Verification
 
-Verification updated on 2 September 2026.
+Verification updated on 4 September 2026.
 
 ## Automated checks
 
 - Debug and release Swift builds complete successfully.
-- All twelve core tests pass.
-- A live Codex app-server probe returns the signed-in ChatGPT plan and usage windows.
+- All twenty-four core tests pass.
+- A live Codex app-server probe returns the signed-in ChatGPT plan, effective default service mode, and usage windows.
 - The current live response maps the seven-day general limit to the weekly display.
 - The current zero-valued five-hour bucket is filtered out.
 - Synthetic tests confirm that an active or reached five-hour bucket appears, and that a quiet model-specific weekly bucket stays hidden until warning level.
-- Projection tests cover the 24-hour weekly minimum, one-hour short-window minimum, 60% short-window display threshold, measured rate, horizon uncertainty, and reset date matching.
+- Projection tests cover the 24-hour weekly minimum, hourly-sampled weighted regression, a bounded one-point update, conservative near-limit ranges, legacy-history decoding, hourly heartbeat compaction, one-hour short-window minimum, the 60% short-window display threshold, and one-minute reset-date jitter.
 - Notification tests verify raw 80%/95% crossings, persisted relaunch latches, reset timestamp jitter, window rollover, and projection rearming.
-- A hostile app-server fixture that floods stderr and ignores termination is force-killed within the configured deadline.
+- App-server fixtures verify service-mode normalization, config errors, response ordering, and that optional config metadata can never delay a valid usage result. A hostile fixture that floods stderr and ignores termination is force-killed within the configured deadline.
 - Carbon global-hotkey support and its local shortcut recorder compile without adding an Accessibility entitlement or permission prompt.
 - The non-visual shortcut self-check successfully registers and releases a temporary Carbon hotkey through the production registration path.
 - Sparkle 2.9.5 resolves and links through the packaged app's Frameworks rpath.

@@ -100,6 +100,7 @@ enum DexBarMain {
             do {
                 let snapshot = try await CodexAppServerClient().fetch()
                 print("plan: \(displayPlan(snapshot.planType) ?? "unknown")")
+                print("service mode: \(snapshot.serviceTier?.displayName ?? "unknown")")
                 print("weekly: \(snapshot.weekly.usedPercent)% / \(snapshot.weekly.durationMinutes) min")
                 print("weekly reset: \(Int(snapshot.weekly.resetsAt.timeIntervalSince1970))")
                 print("visible supplementary windows: \(snapshot.supplementary.count)")
@@ -172,6 +173,7 @@ enum DexBarMain {
             weekly: weekly,
             supplementary: supplementary,
             planType: "pro",
+            serviceTier: .fast,
             credits: UsageCredits(hasCredits: false, unlimited: false, balance: "0"),
             resetCreditsAvailable: 0,
             fetchedAt: state == "stale" ? now.addingTimeInterval(-720) : now

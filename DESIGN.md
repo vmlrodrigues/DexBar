@@ -59,7 +59,7 @@ installed copies from being offered a download URL that is not live yet.
 
 ```text
 Codex CLI app-server
-        │ account/rateLimits/read
+        │ account/rateLimits/read + config/read
         ▼
 response mapper ──► visibility rules ──► AppModel ──► status item + popover
                                               │
@@ -72,9 +72,11 @@ The session-folder activity watcher is only a refresh hint. It is never treated 
 
 ## Projection
 
-The estimator is ported from ClawBar's backtested design. It measures percentage points per day since the most recent observed zeroing for the same reset timestamp, then extrapolates that rate to the reset date. A horizon-based confidence margin—`max(3, 1.5 × days remaining)`—classifies the result as on track, uncertain, or likely to run out.
+The weekly estimator combines two measured paces: the average since the current counter began and a recency-weighted linear trend over the latest 24 hours. Recent observations are sampled into fixed hourly buckets so rapid polling cannot dominate the fit, and their weight decays with a 12-hour half-life. The recent trend is admitted only after at least six hours and three whole percentage points of evidence. Its share then rises smoothly from 25% toward a 75% cap as span and movement grow. This makes a real change in working intensity visible without allowing a single one-point update to replace the estimator's anchor.
 
-Weekly projection starts after 24 hours of observations. Short-window projection starts after one hour but remains invisible below a projected 60%, because five-hour usage is commonly front-loaded and a low estimate is unactionable furniture. Samples expire after eight days, reset changes naturally start a new baseline, and the user can clear history in Settings.
+The tooltip discloses both paces and a conservative reset-date range. The range spans the long and recent outcomes, then adds a whole-point measurement margin that grows when little of the window has elapsed. This prevents a rounded estimate near 100% from being labelled confidently safe. It replaces ClawBar's fixed `1.5 × days remaining` margin, which was calibrated on a different provider and was not evidence for OpenAI usage. The visible marker remains one blended value.
+
+Weekly projection starts after 24 hours of observations. Short-window projection starts after one hour but remains invisible below a projected 60%, because five-hour usage is commonly front-loaded and a low estimate is unactionable furniture. Unchanged samples are retained at most hourly, samples expire after eight days, reset timestamps tolerate one minute of server jitter, reset changes naturally start a new baseline, and the user can clear history in Settings. A failed refresh freezes the projection at the last successful snapshot time instead of letting stale data drift forward.
 
 The projected extent is drawn beneath current usage as a translucent continuation. An anchored marker labels projections up to 100%; off-scale projections replace the false 100% endpoint with one to three chevrons and a right-aligned value.
 
