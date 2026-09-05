@@ -22,6 +22,7 @@ It is built with SwiftUI and AppKit, has no web view, and does not appear in the
 - An optional global shortcut to show or hide the popover from any app, configurable in Menu Bar Settings.
 - Optional notifications at 80%, 95%, and when the weekly projection crosses 100%.
 - Connection, stale-data, and sign-in states without replacing the last known value unnecessarily.
+- The exact app version and build number in the popover footer.
 
 ## Privacy
 
@@ -50,34 +51,51 @@ installed.
 
 ```sh
 swift test
-SIGN=0 ./Scripts/build.sh
+./Scripts/build.sh
 ```
 
-The app bundle is written to `dist/DexBar.app`. Local builds use `SIGN=0`; the default release build finds a Developer ID Application identity and applies a hardened-runtime, timestamped signature.
+The app bundle is written to `dist/DexBar.app`. A normal invocation creates an ad-hoc-signed
+development build: its menu-bar symbol is a hammer, automatic updates and login-item changes
+are disabled, and the About pane identifies it as Development. The build script refuses to
+replace that bundle while it is running.
+
+A release build is deliberately explicit and requires clean, committed source:
+
+```sh
+BUILD_CHANNEL=release SIGN=1 ./Scripts/build.sh
+```
+
+The release build finds a Developer ID Application identity and applies a hardened-runtime,
+timestamped signature. Its exact Git revision is embedded in the application for release
+provenance; unknown build-channel metadata always fails closed as development behavior.
 
 ## Releasing
 
 DexBar follows the same guarded release path as ClawBar:
 
 ```sh
-./Scripts/build.sh       # Developer ID signing
+BUILD_CHANNEL=release SIGN=1 ./Scripts/build.sh  # clean Developer ID release build
 ./Scripts/notarize.sh    # notarise and staple the app and DMG
 ./Scripts/release.sh     # verify, sign the update, and stage release assets/appcast
 PUBLISH=1 ./Scripts/release.sh  # publish the GitHub release and update appcast.xml
 ```
 
-Copy `.env.example` to `.env` first and provide an App Store Connect API key. The release guard refuses dirty source, duplicate versions, mismatched Git-derived build numbers, unpushed commits, unsigned artifacts, and unstapled artifacts. Published releases include a versioned DMG, a stable latest-download DMG, and a SHA-256 checksum.
+Copy `.env.example` to `.env` first and provide an App Store Connect API key. The release guard refuses dirty source, development-channel builds, a source-revision mismatch, mismatched Git-derived build numbers, unpushed commits, unsigned artifacts, and unstapled artifacts. Published releases include a versioned DMG, a stable latest-download DMG, and a SHA-256 checksum.
 
 The release is published before the script commits and pushes `appcast.xml`, so Sparkle
 never sees an enclosure URL that still returns 404. Publication succeeds only after the
 appcast commit is verified on the remote branch. The feed points Sparkle at the versioned,
 notarised GitHub release asset.
 
+Publication is resumable. If GitHub accepted the release but the local appcast commit or push
+failed, rerunning the publish command verifies the existing tag and every downloaded asset
+against the exact candidate before completing the feed publication.
+
 ## Project layout
 
 - `Sources/DexBarCore` contains the Codex app-server client, response mapping, formatting, and projection logic.
 - `Sources/DexBar` contains the AppKit lifecycle and menu-bar plumbing plus SwiftUI views.
-- `Tests/DexBarCoreTests` covers window visibility, health thresholds, adaptive and short-window projection, service-mode mapping, and formatting.
+- `Tests/DexBarCoreTests` covers window visibility, health thresholds, build-channel policy, adaptive and short-window projection, service-mode mapping, and formatting.
 - `Scripts/build.sh` assembles the standalone `.app` bundle.
 
 DexBar is an independent, unofficial tool. It is not made or endorsed by OpenAI.

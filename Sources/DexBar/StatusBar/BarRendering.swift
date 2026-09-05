@@ -49,8 +49,11 @@ enum StatusSymbolCache {
 func attributedStatus(window: UsageWindow, format: BarFormat, now: Date, suffix: String) -> NSAttributedString {
     let output = NSMutableAttributedString()
     let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-    let symbol = window.isWeekly ? "calendar" : "clock"
-    if let image = StatusSymbolCache.image(name: symbol, health: window.health) {
+    let symbol = StatusSymbolPolicy.symbolName(
+        channel: CurrentBuild.channel,
+        isWeekly: window.isWeekly
+    )
+    if let symbol, let image = StatusSymbolCache.image(name: symbol, health: window.health) {
         let attachment = NSTextAttachment()
         attachment.image = image
         attachment.bounds = CGRect(x: 0, y: -2, width: image.size.width, height: image.size.height)
@@ -59,6 +62,24 @@ func attributedStatus(window: UsageWindow, format: BarFormat, now: Date, suffix:
     output.append(NSAttributedString(
         string: " " + formatWindow(window, format: format, now: now) + suffix,
         attributes: [.font: font, .foregroundColor: window.health.nsColor]
+    ))
+    return output
+}
+
+@MainActor
+func attributedPlainStatus(_ text: String, health: UsageHealth) -> NSAttributedString {
+    let output = NSMutableAttributedString()
+    let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+    if let symbol = StatusSymbolPolicy.symbolName(channel: CurrentBuild.channel, isWeekly: nil),
+       let image = StatusSymbolCache.image(name: symbol, health: health) {
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = CGRect(x: 0, y: -2, width: image.size.width, height: image.size.height)
+        output.append(NSAttributedString(attachment: attachment))
+    }
+    output.append(NSAttributedString(
+        string: (output.length == 0 ? "" : " ") + text,
+        attributes: [.font: font, .foregroundColor: health.nsColor]
     ))
     return output
 }

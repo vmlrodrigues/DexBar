@@ -19,7 +19,9 @@ This rule is based on the limits Codex returns rather than assuming every accoun
 - AppKit owns the `NSStatusItem`, `NSPopover`, and settings/onboarding windows.
 - SwiftUI renders the popover, settings, onboarding, meters, state messages, and reusable controls.
 - The app is an `LSUIElement`, so it has no Dock icon or normal app menu presence.
-- The menu bar uses a compact monochrome calendar mark plus percentage and/or reset time.
+- Release builds use a compact monochrome calendar or clock mark plus percentage and/or reset
+  time. Development builds use a hammer in every status state, so they cannot be mistaken for
+  the installed release.
 - Green/neutral is normal, orange starts at 80%, and red starts at 95%.
 - Usage meters are 10 points high, matching ClawBar and standard macOS storage/battery-style meters rather than reading as hairlines.
 - Popover icon controls are pointer-only: they remain accessibility actions but are removed from the Tab loop and do not draw keyboard focus plates.
@@ -39,6 +41,11 @@ check the public appcast once per day. `SUAutomaticallyUpdate` is deliberately a
 Sparkle presents the available update and the user chooses when to install it. Settings
 also exposes a manual **Check Now** action without adding another sidebar destination.
 
+Only a build explicitly assembled with the `release` channel starts Sparkle. Missing, unknown,
+and ordinary local build metadata fail closed as `development`; those builds neither start the
+updater nor allow Check Now. Their launch-at-login control is also disabled so a temporary
+development bundle cannot replace or unregister the installed release's login item.
+
 The appcast lives in the public GitHub repository and every versioned DMG is signed with a
 DexBar-specific EdDSA key. The private key lives only in the developer's login Keychain;
 the public key is baked into `Info.plist`. Losing or changing that private key would prevent
@@ -51,9 +58,13 @@ modal alert, preventing scheduled-update UI from appearing behind another applic
 
 The release script stages a candidate appcast alongside the signed release assets and
 refuses to sign it unless the selected Keychain account derives the public key embedded in
-the app. On an explicit publish it creates the GitHub release first, then commits and pushes
-the repository appcast and verifies that commit on the remote branch. This ordering prevents
-installed copies from being offered a download URL that is not live yet.
+the app. Release builds embed their exact Git source revision; notarisation and publication
+both require that revision to match clean source, rather than treating a non-unique commit
+count as identity. On an explicit publish the script creates the GitHub release first, then
+commits and pushes the repository appcast and verifies that commit on the remote branch. This
+ordering prevents installed copies from being offered a download URL that is not live yet.
+The candidate appcast date is deterministic, and a retry verifies an existing tag and all
+published assets before resuming an interrupted appcast publication.
 
 ## Data flow
 

@@ -30,15 +30,18 @@ final class UpdaterController: ObservableObject {
             userDriverDelegate: delegate
         )
 
-        controller.updater.publisher(for: \.canCheckForUpdates)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] value in self?.canCheck = value }
-            .store(in: &cancellables)
+        if CurrentBuild.automaticUpdatesEnabled {
+            controller.updater.publisher(for: \.canCheckForUpdates)
+                .receive(on: RunLoop.main)
+                .sink { [weak self] value in self?.canCheck = value }
+                .store(in: &cancellables)
 
-        controller.startUpdater()
+            controller.startUpdater()
+        }
     }
 
     func checkForUpdates() {
+        guard CurrentBuild.automaticUpdatesEnabled else { return }
         NSApp.activate()
         controller.updater.checkForUpdates()
     }

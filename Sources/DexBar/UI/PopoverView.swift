@@ -152,7 +152,14 @@ struct PopoverView: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 8) {
+            Text(bundleVersionString())
+                .font(.system(size: 9))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .help("Version and build number. The build number is what Sparkle compares when checking for updates.")
+                .fixedSize()
+            Spacer()
             HStack(spacing: 5) {
                 Circle()
                     .fill(freshnessColor)
@@ -162,7 +169,6 @@ struct PopoverView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
-            Spacer()
             Button(action: openSettings) { Image(systemName: "gearshape") }
                 .buttonStyle(.plain)
                 .help("Settings")

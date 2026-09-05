@@ -40,7 +40,8 @@ struct SettingsView: View {
     let openSignIn: () -> Void
 
     @State private var selected: Pane = .general
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var launchAtLogin = CurrentBuild.loginItemChangesEnabled
+        && SMAppService.mainApp.status == .enabled
     @State private var launchError: String?
     @State private var notificationStatus: UNAuthorizationStatus?
     @State private var clearedHistory = false
@@ -123,19 +124,28 @@ struct SettingsView: View {
     private var general: some View {
         VStack(alignment: .leading, spacing: 14) {
             group {
-                Toggle("Launch DexBar at login", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, wanted in
-                        do {
-                            if wanted { try SMAppService.mainApp.register() }
-                            else { try SMAppService.mainApp.unregister() }
-                            launchError = nil
-                        } catch {
-                            launchError = error.localizedDescription
-                            launchAtLogin = SMAppService.mainApp.status == .enabled
-                        }
-                }
-                if let launchError {
-                    Text(launchError).font(Typography.detail).foregroundStyle(.orange)
+                if CurrentBuild.isDevelopment {
+                    settingsRow(
+                        title: "Launch DexBar at login",
+                        detail: "Managed by the installed release build."
+                    ) {
+                        Text("Disabled").foregroundStyle(.secondary)
+                    }
+                } else {
+                    Toggle("Launch DexBar at login", isOn: $launchAtLogin)
+                        .onChange(of: launchAtLogin) { _, wanted in
+                            do {
+                                if wanted { try SMAppService.mainApp.register() }
+                                else { try SMAppService.mainApp.unregister() }
+                                launchError = nil
+                            } catch {
+                                launchError = error.localizedDescription
+                                launchAtLogin = SMAppService.mainApp.status == .enabled
+                            }
+                    }
+                    if let launchError {
+                        Text(launchError).font(Typography.detail).foregroundStyle(.orange)
+                    }
                 }
             }
             group {
@@ -154,7 +164,9 @@ struct SettingsView: View {
             group {
                 settingsRow(
                     title: "Software updates",
-                    detail: "Checks once a day and asks before installing."
+                    detail: CurrentBuild.isDevelopment
+                        ? "Disabled in development builds."
+                        : "Checks once a day and asks before installing."
                 ) {
                     Button("Check Now") { updater.checkForUpdates() }
                         .controlSize(.small)
@@ -290,7 +302,11 @@ struct SettingsView: View {
             HStack(spacing: 12) {
                 AppMark(size: 46)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("DexBar \(bundleVersionString())").font(.headline)
+                    Text(
+                        "DexBar \(bundleVersionString())"
+                            + (CurrentBuild.isDevelopment ? " Development" : "")
+                    )
+                    .font(.headline)
                     Text("OpenAI usage in your menu bar.").foregroundStyle(.secondary)
                 }
             }

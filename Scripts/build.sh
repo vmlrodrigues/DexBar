@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Builds DexBar.app and signs it with a Developer ID identity.
+# Builds DexBar.app. Local builds are development-channel and ad-hoc signed by default;
+# release behavior and Developer ID signing must both be requested explicitly.
 #
-#   ./Scripts/build.sh          release build, signed
-#   SIGN=0 ./Scripts/build.sh   ad-hoc signing for local testing
+#   ./Scripts/build.sh                              local development build
+#   SIGN=1 ./Scripts/build.sh                       Developer ID-signed development build
+#   BUILD_CHANNEL=release SIGN=1 ./Scripts/build.sh release build
 #
 # VERSION changes only when cutting a release. BUILD is the git commit count so it is
 # monotonic and reproducible; release builds never silently invent a fallback number.
@@ -26,10 +28,64 @@ if [ -z "${BUILD:-}" ]; then
 fi
 [[ "$BUILD" =~ ^[1-9][0-9]*$ ]] || { echo "error: invalid BUILD '$BUILD'" >&2; exit 1; }
 
-SIGN="${SIGN:-1}"
+SIGN="${SIGN:-0}"
 [[ "$SIGN" = "0" || "$SIGN" = "1" ]] || { echo "error: SIGN must be 0 or 1" >&2; exit 1; }
+BUILD_CHANNEL="${BUILD_CHANNEL:-development}"
+[[ "$BUILD_CHANNEL" = "development" || "$BUILD_CHANNEL" = "release" ]] \
+    || { echo "error: BUILD_CHANNEL must be development or release" >&2; exit 1; }
+[ "$BUILD_CHANNEL" != "release" ] || [ "$SIGN" = "1" ] \
+    || { echo "error: release builds require SIGN=1" >&2; exit 1; }
 
-echo "==> Building $APP_NAME $VERSION ($BUILD)"
+SOURCE_REVISION="${SOURCE_REVISION:-}"
+if [ -z "$SOURCE_REVISION" ]; then
+    if SOURCE_REVISION="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null)"; then
+        if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]; then
+            SOURCE_REVISION="$SOURCE_REVISION-dirty"
+        fi
+    else
+        SOURCE_REVISION="unknown"
+    fi
+fi
+[[ "$SOURCE_REVISION" = "unknown" || "$SOURCE_REVISION" =~ ^[0-9a-f]{40,64}(-dirty)?$ ]] \
+    || { echo "error: invalid SOURCE_REVISION '$SOURCE_REVISION'" >&2; exit 1; }
+
+if [ "$BUILD_CHANNEL" = "release" ]; then
+    [ "$SOURCE_REVISION" != "unknown" ] && [[ "$SOURCE_REVISION" != *-dirty ]] \
+        || { echo "error: release builds require clean, committed source" >&2; exit 1; }
+fi
+
+RUNNING_PID=""
+PIDS=""
+if PIDS="$(pgrep -x "$APP_NAME" 2>/dev/null)"; then
+    :
+else
+    PGREP_STATUS="$?"
+    # pgrep returns 1 when there are simply no matches. Any other failure means the
+    # process list could not be inspected, so replacing the bundle would be unsafe.
+    [ "$PGREP_STATUS" = "1" ] || {
+        echo "error: unable to inspect running $APP_NAME processes" >&2
+        exit 1
+    }
+fi
+while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    PROCESS_COMMAND="$(ps -ww -p "$pid" -o command= 2>/dev/null)" || {
+        echo "error: unable to inspect $APP_NAME process $pid" >&2
+        exit 1
+    }
+    if [ "$PROCESS_COMMAND" = "$APP/Contents/MacOS/$APP_NAME" ] \
+        || [[ "$PROCESS_COMMAND" = "$APP/Contents/MacOS/$APP_NAME "* ]]; then
+        RUNNING_PID="$pid"
+        break
+    fi
+done <<< "$PIDS"
+[ -z "$RUNNING_PID" ] || {
+    echo "error: $APP is running as pid $RUNNING_PID" >&2
+    echo "       quit that development copy before rebuilding its bundle" >&2
+    exit 1
+}
+
+echo "==> Building $APP_NAME $VERSION ($BUILD) [$BUILD_CHANNEL, $SOURCE_REVISION]"
 swift build -c release --package-path "$ROOT"
 
 BIN="$ROOT/.build/release/$APP_NAME"
@@ -40,6 +96,8 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/$APP_NAME"
 sed -e "s/__VERSION__/$VERSION/g" -e "s/__BUILD__/$BUILD/g" \
+    -e "s/__BUILD_CHANNEL__/$BUILD_CHANNEL/g" \
+    -e "s/__SOURCE_REVISION__/$SOURCE_REVISION/g" \
     "$ROOT/Resources/Info.plist" > "$APP/Contents/Info.plist"
 
 if [ -f "$ROOT/Resources/AppIcon.icns" ]; then

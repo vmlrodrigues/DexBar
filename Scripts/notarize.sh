@@ -3,7 +3,7 @@
 #
 # Setup: copy .env.example to .env and fill it in, then run:
 #
-#   ./Scripts/build.sh
+#   BUILD_CHANNEL=release SIGN=1 ./Scripts/build.sh
 #   ./Scripts/notarize.sh
 
 set -euo pipefail
@@ -16,6 +16,18 @@ DMG="$DIST/$APP_NAME.dmg"
 ENV_FILE="${ENV_FILE:-$ROOT/.env}"
 
 [ -d "$APP" ] || { echo "error: $APP not found — run Scripts/build.sh first" >&2; exit 1; }
+
+plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist"; }
+CHANNEL="$(plist DexBarBuildChannel)"
+[ "$CHANNEL" = "release" ] \
+    || { echo "error: app build channel is '$CHANNEL', expected release" >&2; exit 1; }
+SOURCE_REVISION="$(plist DexBarSourceRevision)"
+CURRENT_REVISION="$(git -C "$ROOT" rev-parse --verify HEAD)"
+[ "$SOURCE_REVISION" = "$CURRENT_REVISION" ] \
+    || { echo "error: app was built from $SOURCE_REVISION but HEAD is $CURRENT_REVISION" >&2; exit 1; }
+[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ] \
+    || { echo "error: release source has uncommitted or untracked files" >&2; exit 1; }
+
 [ -f "$ENV_FILE" ] || {
     echo "error: no release environment at $ENV_FILE" >&2
     echo "       copy $ROOT/.env.example to $ROOT/.env and fill it in" >&2
@@ -35,6 +47,8 @@ IDENTITY="${RELEASE_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>
 
 echo "==> Verifying the app signature"
 codesign --verify --strict --deep --verbose=2 "$APP"
+codesign -dv --verbose=4 "$APP" 2>&1 | grep -q '^Authority=Developer ID Application:' \
+    || { echo "error: app is not signed with a Developer ID Application identity" >&2; exit 1; }
 
 ZIP="$DIST/$APP_NAME-app.zip"
 echo "==> [1/2] Notarising the app"

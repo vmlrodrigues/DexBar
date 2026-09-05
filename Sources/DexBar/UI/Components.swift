@@ -208,7 +208,13 @@ struct UsageWindowRow: View {
 }
 
 func bundleVersionString() -> String {
-    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
-    let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+    let isHeadlessRender = CommandLine.arguments.contains { $0.hasPrefix("--render-") }
+    let environment = ProcessInfo.processInfo.environment
+    let version = (isHeadlessRender ? environment["DEXBAR_RENDER_VERSION"] : nil)
+        ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        ?? "—"
+    let build = (isHeadlessRender ? environment["DEXBAR_RENDER_BUILD"] : nil)
+        ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        ?? "—"
     return "\(version) (\(build))"
 }

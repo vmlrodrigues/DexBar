@@ -20,6 +20,10 @@
 	<string>__VERSION__</string>
 	<key>CFBundleVersion</key>
 	<string>__BUILD__</string>
+	<key>DexBarBuildChannel</key>
+	<string>__BUILD_CHANNEL__</string>
+	<key>DexBarSourceRevision</key>
+	<string>__SOURCE_REVISION__</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>

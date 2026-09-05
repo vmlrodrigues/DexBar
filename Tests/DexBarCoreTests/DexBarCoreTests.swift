@@ -78,6 +78,52 @@ final class DexBarCoreTests: XCTestCase {
         XCTAssertEqual(UsageHealth.forPercent(95), .critical)
     }
 
+    func testBuildChannelEnablesReleaseOnlyBehaviorOnlyForRelease() {
+        let release = BuildChannel(plistValue: "release")
+        XCTAssertEqual(release, .release)
+        XCTAssertTrue(release.automaticUpdatesEnabled)
+        XCTAssertTrue(release.loginItemChangesEnabled)
+
+        let mixedCase = BuildChannel(plistValue: "  ReLeAsE\n")
+        XCTAssertEqual(mixedCase, .release)
+    }
+
+    func testBuildChannelFailsClosedForMissingOrUnknownMetadata() {
+        for value: Any? in [nil, "", "development", "nightly", 1] {
+            let channel = BuildChannel(plistValue: value)
+            XCTAssertEqual(channel, .development)
+            XCTAssertFalse(channel.automaticUpdatesEnabled)
+            XCTAssertFalse(channel.loginItemChangesEnabled)
+        }
+    }
+
+    func testDevelopmentStatusSymbolSurvivesUsageAndNonUsageStates() {
+        XCTAssertEqual(
+            StatusSymbolPolicy.symbolName(channel: .development, isWeekly: nil),
+            "hammer.fill"
+        )
+        XCTAssertEqual(
+            StatusSymbolPolicy.symbolName(channel: .development, isWeekly: true),
+            "hammer.fill"
+        )
+        XCTAssertEqual(
+            StatusSymbolPolicy.symbolName(channel: .development, isWeekly: false),
+            "hammer.fill"
+        )
+    }
+
+    func testReleaseStatusSymbolsKeepTheirWindowMeaning() {
+        XCTAssertNil(StatusSymbolPolicy.symbolName(channel: .release, isWeekly: nil))
+        XCTAssertEqual(
+            StatusSymbolPolicy.symbolName(channel: .release, isWeekly: true),
+            "calendar"
+        )
+        XCTAssertEqual(
+            StatusSymbolPolicy.symbolName(channel: .release, isWeekly: false),
+            "clock"
+        )
+    }
+
     func testProjectionWaitsForHistoryAndProjectsFromMeasuredPace() {
         let reset = now.addingTimeInterval(3 * 86_400)
         let window = UsageWindow(

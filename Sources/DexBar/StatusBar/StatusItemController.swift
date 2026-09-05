@@ -26,32 +26,38 @@ final class StatusItemController {
 
     func update(now: Date = Date()) {
         guard let button = item.button else { return }
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        func developmentTooltip(_ tooltip: String?) -> String? {
+            guard CurrentBuild.isDevelopment else { return tooltip }
+            let marker = "DexBar Development — automatic updates disabled"
+            guard let tooltip, !tooltip.isEmpty else { return marker }
+            return "\(tooltip)\n\(marker)"
+        }
 
-        func plain(_ text: String, color: NSColor, tooltip: String?) {
-            let key = "plain|\(text)|\(color.description)"
+        func plain(_ text: String, health: UsageHealth, tooltip: String?) {
+            let tooltip = developmentTooltip(tooltip)
+            let key = "plain|\(text)|\(health.rawValue)|\(tooltip ?? "")|\(CurrentBuild.channel.rawValue)"
             guard key != lastKey else { return }
             lastKey = key
             button.image = nil
-            button.attributedTitle = NSAttributedString(
-                string: text,
-                attributes: [.font: font, .foregroundColor: color]
-            )
+            button.attributedTitle = attributedPlainStatus(text, health: health)
             button.toolTip = tooltip
+            button.setAccessibilityLabel(
+                "DexBar\(CurrentBuild.isDevelopment ? " development" : ""), \(text)"
+            )
         }
 
         switch model.state {
         case .loading where model.snapshot == nil:
-            plain("…", color: .labelColor, tooltip: "Checking Codex usage")
+            plain("…", health: .normal, tooltip: "Checking Codex usage")
         case .needsAuthentication:
-            plain("Sign in", color: .systemRed, tooltip: "Codex needs you to sign in again")
+            plain("Sign in", health: .critical, tooltip: "Codex needs you to sign in again")
         case .cliUnavailable:
-            plain("No Codex", color: .systemOrange, tooltip: "Codex CLI was not found")
+            plain("No Codex", health: .warning, tooltip: "Codex CLI was not found")
         case .failed(let message) where model.snapshot == nil:
-            plain("—", color: .systemOrange, tooltip: message)
+            plain("—", health: .warning, tooltip: message)
         default:
             guard let snapshot = model.snapshot else {
-                plain("—", color: .systemOrange, tooltip: nil)
+                plain("—", health: .warning, tooltip: nil)
                 return
             }
             let window = snapshot.preferredMenuWindow
@@ -61,7 +67,9 @@ final class StatusItemController {
                 suffix = " •"
                 tooltip = "Stale: \(message)"
             }
-            let key = "\(window.id)|\(window.roundedPercent)|\(Int(window.resetsAt.timeIntervalSince(now) / 60))|\(Preferences.shared.barFormat.rawValue)|\(suffix)"
+            tooltip = developmentTooltip(tooltip) ?? tooltip
+            let formatted = formatWindow(window, format: Preferences.shared.barFormat, now: now)
+            let key = "\(window.id)|\(window.roundedPercent)|\(Int(window.resetsAt.timeIntervalSince(now) / 60))|\(Preferences.shared.barFormat.rawValue)|\(suffix)|\(tooltip)|\(CurrentBuild.channel.rawValue)"
             guard key != lastKey else { return }
             lastKey = key
             button.image = nil
@@ -72,6 +80,9 @@ final class StatusItemController {
                 suffix: suffix
             )
             button.toolTip = tooltip
+            button.setAccessibilityLabel(
+                "DexBar\(CurrentBuild.isDevelopment ? " development" : ""), \(formatted)\(suffix)"
+            )
         }
     }
 }

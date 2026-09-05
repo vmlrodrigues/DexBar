@@ -39,6 +39,10 @@ def main() -> None:
     parser.add_argument("--sig-attrs", required=True)
     parser.add_argument("--min-system", required=True)
     parser.add_argument("--link")
+    parser.add_argument(
+        "--pub-date",
+        help="RFC 2822 publication date; defaults to now for interactive use",
+    )
     args = parser.parse_args()
 
     signature = re.search(r'sparkle:edSignature="([^"]+)"', args.sig_attrs)
@@ -56,7 +60,7 @@ def main() -> None:
     ET.SubElement(item, "title").text = args.short_version
     if args.link:
         ET.SubElement(item, "link").text = args.link
-    ET.SubElement(item, "pubDate").text = email.utils.formatdate(localtime=True)
+    ET.SubElement(item, "pubDate").text = args.pub_date or email.utils.formatdate(localtime=True)
     ET.SubElement(item, sparkle_tag("version")).text = args.version
     ET.SubElement(item, sparkle_tag("shortVersionString")).text = args.short_version
     ET.SubElement(item, sparkle_tag("minimumSystemVersion")).text = args.min_system

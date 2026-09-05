@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import Darwin
 import SwiftUI
 import DexBarCore
 
@@ -10,6 +11,13 @@ enum Retainer {
 @main
 enum DexBarMain {
     static func main() {
+        if CommandLine.arguments.contains("--version") {
+            print(
+                "DexBar \(bundleVersionString()) "
+                    + "[\(CurrentBuild.channel.rawValue), \(CurrentBuild.sourceRevision)]"
+            )
+            return
+        }
         if CommandLine.arguments.contains("--probe") {
             runProbe()
             return
@@ -23,6 +31,7 @@ enum DexBarMain {
             return
         }
         if CommandLine.arguments.contains("--hotkey-check") {
+            requireUnbundledHeadlessAppKit()
             MainActor.assumeIsolated {
                 prepareHeadlessRendering()
                 let center = HotKeyCenter.shared
@@ -37,6 +46,7 @@ enum DexBarMain {
             return
         }
         if let index = CommandLine.arguments.firstIndex(of: "--render-popover") {
+            requireUnbundledHeadlessAppKit()
             let path = argument(after: index, fallback: "/tmp/dexbar-popover.png")
             let state = argument(after: index + 1, fallback: "current")
             MainActor.assumeIsolated {
@@ -46,6 +56,7 @@ enum DexBarMain {
             return
         }
         if let index = CommandLine.arguments.firstIndex(of: "--render-settings") {
+            requireUnbundledHeadlessAppKit()
             let path = argument(after: index, fallback: "/tmp/dexbar-settings.png")
             MainActor.assumeIsolated {
                 prepareHeadlessRendering()
@@ -69,6 +80,7 @@ enum DexBarMain {
             return
         }
         if let index = CommandLine.arguments.firstIndex(of: "--render-onboarding") {
+            requireUnbundledHeadlessAppKit()
             let path = argument(after: index, fallback: "/tmp/dexbar-onboarding.png")
             MainActor.assumeIsolated {
                 prepareHeadlessRendering()
@@ -91,6 +103,18 @@ enum DexBarMain {
     private static func argument(after index: Int, fallback: String) -> String {
         let valueIndex = index + 1
         return valueIndex < CommandLine.arguments.count ? CommandLine.arguments[valueIndex] : fallback
+    }
+
+    /// LaunchServices registers a packaged application before AppKit is available. Running
+    /// that bundle executable directly from a shell aborts on current macOS; the SwiftPM
+    /// product has the same rendering code without pretending to be an application launch.
+    private static func requireUnbundledHeadlessAppKit() {
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            FileHandle.standardError.write(Data(
+                "Headless checks must use .build/release/DexBar, not the packaged app executable.\n".utf8
+            ))
+            exit(64)
+        }
     }
 
     private static func runProbe() {
