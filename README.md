@@ -1,53 +1,127 @@
-# DexBar
+<p align="center">
+  <img src="Docs/DexBar-icon.png" width="112" alt="DexBar app icon">
+</p>
 
-![Platform](https://img.shields.io/badge/platform-macOS%2014.0%2B-brightgreen)
-![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-M1%2B-black?logo=apple&logoColor=white)
-![Notarised](https://img.shields.io/badge/Notarised-Developer%20ID-success)
-[![Latest release](https://img.shields.io/github/v/release/vmlrodrigues/DexBar?label=latest)](https://github.com/vmlrodrigues/DexBar/releases/latest)
+<h1 align="center">DexBar</h1>
 
-[![Download for Mac](https://img.shields.io/badge/Download_for_Mac-007AFF?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/vmlrodrigues/DexBar/releases/latest/download/DexBar.dmg)
+<p align="center">
+  A small, native macOS menu-bar app for the Codex usage limits on your ChatGPT account.
+</p>
 
-DexBar is a small, native macOS menu-bar app that shows the OpenAI Codex usage available to the ChatGPT account already signed in through Codex.
+<p align="center">
+  <img alt="macOS 14 or later" src="https://img.shields.io/badge/platform-macOS%2014.0%2B-brightgreen">
+  <img alt="Apple silicon" src="https://img.shields.io/badge/Apple_Silicon-M1%2B-black?logo=apple&amp;logoColor=white">
+  <img alt="Developer ID notarised" src="https://img.shields.io/badge/Notarised-Developer%20ID-success">
+  <a href="https://github.com/vmlrodrigues/DexBar/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/vmlrodrigues/DexBar?label=latest"></a>
+</p>
 
-It is built with SwiftUI and AppKit, has no web view, and does not appear in the Dock. The normal menu-bar display is deliberately quiet: it shows the weekly allowance, while a shorter window such as a five-hour cap appears only after Codex reports that window as active or reached.
+<p align="center">
+  <a href="https://github.com/vmlrodrigues/DexBar/releases/latest/download/DexBar.dmg"><img alt="Download DexBar for Mac" src="https://img.shields.io/badge/Download_for_Mac-007AFF?style=for-the-badge&amp;logo=apple&amp;logoColor=white"></a>
+</p>
 
-![DexBar showing the minimal weekly view](Docs/DexBar-current.png)
+DexBar uses the ChatGPT account already signed in through the Codex CLI. It is built with
+SwiftUI and AppKit, contains no web view, and stays out of the Dock. The normal display is
+deliberately quiet: weekly usage remains primary, while shorter or model-specific limits
+surface only when Codex reports that they matter.
+
+<p align="center">
+  <a href="Docs/DexBar-current.png"><img src="Docs/DexBar-current.png" width="600" alt="DexBar showing the minimal weekly usage view"></a>
+</p>
+
+<p align="center"><sub>The minimal weekly view, using sample data.</sub></p>
+
+> [!NOTE]
+> DexBar is an independent, unofficial tool. It is not made or endorsed by OpenAI. It uses
+> a local Codex app-server interface that may change or stop working in a future Codex release.
 
 ## What it shows
 
-- Weekly usage, percentage used, time until reset, and the exact reset date.
-- An adaptive weekly projection after one day of history, plus a quiet short-window projection after one hour when it is heading to at least 60%.
-- The ChatGPT plan and Codex default service mode when the local app server reports them.
-- Active shorter windows and urgent model-specific limits only when they matter.
-- An optional global shortcut to show or hide the popover from any app, configurable in Menu Bar Settings.
-- Optional notifications at 80%, 95%, and when the weekly projection crosses 100%.
-- Connection, stale-data, and sign-in states without replacing the last known value unnecessarily.
-- The exact app version and build number in the popover footer.
+- Weekly usage, percentage used, time remaining, and the exact reset date.
+- Active shorter windows, such as a five-hour model limit, only after they have actually
+  been used or reached.
+- Model-specific long windows once they reach warning territory, without filling the popover
+  with inactive or low-usage meters.
+- A local weekly projection after 24 hours of history for the same reset window. When enough
+  recent movement exists, DexBar blends the full-window pace with a recency-weighted trend.
+- A deliberately quiet short-window projection after one hour, shown only when it points to
+  at least 60% usage by reset.
+- The ChatGPT plan and default Codex service mode—Standard, Fast, or Ultra Fast—when the local
+  app server reports them.
+- Usage-credit status when Codex reports credits, a non-zero balance, or unlimited access.
+- Connection, stale-data, missing-CLI, and sign-in states while retaining the last successful
+  reading whenever possible.
+- The exact application version and build number in the popover footer.
+
+The menu bar normally represents the weekly window. If an active supplementary window becomes
+more urgent, DexBar automatically surfaces that window instead. Its text can be configured as
+percentage and time, time and percentage, percentage only, or time only.
+
+## When another limit matters
+
+An active short window appears beneath the weekly allowance, with its model or bucket name for
+context. Inactive short windows remain invisible.
+
+<p align="center">
+  <a href="Docs/DexBar-active-window.png"><img src="Docs/DexBar-active-window.png" width="560" alt="DexBar showing an active five-hour model window"></a>
+</p>
+
+<p align="center"><sub>An active five-hour window, using sample data.</sub></p>
+
+Projection is shown on the same meter. The marker indicates the central estimate; its tooltip
+explains the measured pace, uncertainty range, and estimated limit time when applicable. Orange
+and red appear only when the uncertainty range says the allowance may or is likely to run out.
+
+<p align="center">
+  <a href="Docs/DexBar-projection-warning.png"><img src="Docs/DexBar-projection-warning.png" width="600" alt="DexBar warning that projected weekly usage exceeds the limit"></a>
+</p>
+
+<p align="center"><sub>A weekly projection crossing the limit, using sample data.</sub></p>
+
+## Other features
+
+- Adaptive refresh: every minute during recent Codex activity or at 80% usage and above,
+  every three minutes after brief inactivity, and every five minutes while idle.
+- Immediate refresh when the popover opens and after the Mac wakes.
+- Optional notifications at 80%, 95%, and when the weekly projection crosses the limit.
+- An optional global shortcut to show or hide the popover from any app.
+- Launch at login, manual refresh, projection-history clearing, and a manual update check.
+- Daily Sparkle update checks that always ask before installing.
+
+The global shortcut uses Carbon hotkey registration. It receives only the chosen combination,
+ships disabled and unbound, and does not require Accessibility permission.
 
 ## Privacy
 
-DexBar starts the installed Codex CLI's local app server and asks it for account rate limits and the effective default service mode. It reuses the Codex sign-in but does not read or copy Codex credentials into its own files. It stores only usage percentages, timestamps, and reset dates for projection. Service mode is display-only and is not written to projection history. DexBar never sends a prompt to check usage.
+DexBar starts the installed Codex CLI's local app server and asks it for account rate limits
+and the effective default service mode. It reuses the existing Codex sign-in but does not read
+or copy authentication tokens into its own files or logs. Checking usage does not send a prompt,
+consume allowance, or start a usage window.
 
-The optional global shortcut uses macOS's Carbon hotkey registration. It receives only the chosen combination and does not require Accessibility permission. The shortcut ships disabled and unbound so DexBar does not claim a system-wide key combination without being asked.
+For projection, DexBar stores only window identifiers, usage percentages, timestamps, and reset
+dates in `~/Library/Application Support/DexBar/projection-history.json`. The history is retained
+for eight days and can be cleared from **Settings → Data & Privacy**. It contains no prompts,
+source code, account identifiers, or service-mode history.
+
+DexBar watches filesystem-change notifications beneath `~/.codex/sessions` solely to choose a
+fresher polling interval after Codex activity. It does not open or read the session contents.
 
 ## Requirements
 
 - macOS 14 or later.
-- Apple silicon.
+- An Apple-silicon Mac.
 - Codex CLI installed and signed in with ChatGPT.
 
 ## Install
 
-1. [Download DexBar.dmg](https://github.com/vmlrodrigues/DexBar/releases/latest/download/DexBar.dmg).
+1. [Download the latest notarised DMG](https://github.com/vmlrodrigues/DexBar/releases/latest/download/DexBar.dmg).
 2. Open the disk image and drag DexBar to Applications.
 3. Launch DexBar. It will use the ChatGPT account already signed in through the Codex CLI.
 
-DexBar checks for updates once per day and prompts before installing them. You can also
-check immediately from **Settings → General → Software updates**. Update downloads are
-verified with a DexBar-specific EdDSA signature and Apple's code signature before they are
-installed.
+DexBar checks for updates once every 24 hours and prompts before installing them. You can check
+immediately from **Settings → General → Software updates**. Sparkle verifies downloads with a
+DexBar-specific EdDSA signature in addition to Apple's code-signing and notarization checks.
 
-## Build
+## Build from source
 
 ```sh
 swift test
@@ -57,7 +131,13 @@ swift test
 The app bundle is written to `dist/DexBar.app`. A normal invocation creates an ad-hoc-signed
 development build: its menu-bar symbol is a hammer, automatic updates and login-item changes
 are disabled, and the About pane identifies it as Development. The build script refuses to
-replace that bundle while it is running.
+replace that exact development bundle while it is running.
+
+Regenerate every standard and Retina icon representation, plus `Resources/AppIcon.icns`, with:
+
+```sh
+swift Scripts/make-icon.swift
+```
 
 A release build is deliberately explicit and requires clean, committed source:
 
@@ -66,18 +146,16 @@ BUILD_CHANNEL=release SIGN=1 ./Scripts/build.sh
 ```
 
 The release build finds a Developer ID Application identity and applies a hardened-runtime,
-timestamped signature. Its exact Git revision is embedded in the application for release
-provenance; unknown build-channel metadata always fails closed as development behavior.
+timestamped signature. It also embeds the exact Git revision and Git-derived build number;
+missing or unknown build-channel metadata always fails closed as development behavior.
 
-## Releasing
-
-DexBar follows the same guarded release path as ClawBar:
+## Release process
 
 ```sh
-BUILD_CHANNEL=release SIGN=1 ./Scripts/build.sh  # clean Developer ID release build
-./Scripts/notarize.sh    # notarise and staple the app and DMG
-./Scripts/release.sh     # verify, sign the update, and stage release assets/appcast
-PUBLISH=1 ./Scripts/release.sh  # publish the GitHub release and update appcast.xml
+BUILD_CHANNEL=release SIGN=1 ./Scripts/build.sh
+./Scripts/notarize.sh
+./Scripts/release.sh
+PUBLISH=1 ./Scripts/release.sh
 ```
 
 Store validated notarization credentials in the macOS Keychain once:
@@ -86,33 +164,32 @@ Store validated notarization credentials in the macOS Keychain once:
 xcrun notarytool store-credentials PersonalProjectsNotary --sync
 ```
 
-The release scripts use that shared profile by default; set `NOTARY_KEYCHAIN_PROFILE` only
-when deliberately using another validated profile. No App Store Connect private key or
-issuer metadata is copied into the repository. The release guard refuses dirty source,
-development-channel builds, a source-revision mismatch, mismatched Git-derived build
-numbers, unpushed commits, unsigned artifacts, and unstapled artifacts. Published releases
-include a versioned DMG, a stable latest-download DMG, and a SHA-256 checksum.
+The scripts use that Keychain profile by default; set `NOTARY_KEYCHAIN_PROFILE` only when
+deliberately using another validated profile. No App Store Connect private key or issuer
+metadata is copied into the repository.
 
-The release is published before the script commits and pushes `appcast.xml`, so Sparkle
-never sees an enclosure URL that still returns 404. Publication succeeds only after the
-appcast commit is verified on the remote branch. The feed points Sparkle at the versioned,
-notarised GitHub release asset.
-
-Publication is resumable. If GitHub accepted the release but the local appcast commit or push
-failed, rerunning the publish command verifies the existing tag and every downloaded asset
-against the exact candidate before completing the feed publication.
+The release guard rejects dirty or unpushed source, development-channel builds, source-revision
+or build-number mismatches, unsigned artifacts, and unstapled artifacts. It publishes a
+versioned DMG, a stable latest-download DMG, and a SHA-256 checksum. The GitHub release is made
+available before the signed `appcast.xml` entry is committed and pushed, so Sparkle never sees
+an enclosure URL that still returns 404. Publication is resumable and verifies existing remote
+assets byte-for-byte before continuing after a partial failure.
 
 ## Project layout
 
-- `Sources/DexBarCore` contains the Codex app-server client, response mapping, formatting, and projection logic.
-- `Sources/DexBar` contains the AppKit lifecycle and menu-bar plumbing plus SwiftUI views.
-- `Tests/DexBarCoreTests` covers window visibility, health thresholds, build-channel policy, adaptive and short-window projection, service-mode mapping, and formatting.
-- `Scripts/build.sh` assembles the standalone `.app` bundle.
-
-DexBar is an independent, unofficial tool. It is not made or endorsed by OpenAI.
+- `Sources/DexBarCore` — Codex app-server client, response mapping, formatting, notification
+  policy, and projection logic.
+- `Sources/DexBar` — AppKit lifecycle and menu-bar plumbing, SwiftUI views, preferences,
+  notifications, polling, and Sparkle integration.
+- `Tests/DexBarCoreTests` — window visibility, thresholds, build policy, projection,
+  service-mode mapping, client lifecycle, notifications, and formatting tests.
+- `Scripts` — deterministic icon generation, application assembly, signing, notarization,
+  appcast generation, and guarded GitHub publication.
+- `Docs` — README screenshots generated by DexBar's headless native renderer, plus the app-icon
+  preview.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE). Sparkle's complete licence and bundled third-party notices
-are retained in [Resources/ThirdPartyLicenses/Sparkle-LICENSE.txt](Resources/ThirdPartyLicenses/Sparkle-LICENSE.txt)
+MIT — see [LICENSE](LICENSE). Sparkle's complete licence and bundled third-party notices are
+retained in [Resources/ThirdPartyLicenses/Sparkle-LICENSE.txt](Resources/ThirdPartyLicenses/Sparkle-LICENSE.txt)
 and included in the application bundle.
