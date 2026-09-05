@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import DexBarCore
 
@@ -15,15 +16,23 @@ struct AppMark: View {
     var size: CGFloat = 30
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
-                .fill(Color.accentColor.gradient)
-            Text("D")
-                .font(.system(size: size * 0.52, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
+        Image(nsImage: applicationIcon)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+
+    private var applicationIcon: NSImage {
+        // A packaged build must always show the icon registered with AppKit. The
+        // source-tree fallback keeps the existing headless screenshot renderer useful.
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            return NSApplication.shared.applicationIconImage
         }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
+        let sourceIcon = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("Resources/AppIcon.icns")
+        return NSImage(contentsOf: sourceIcon) ?? NSApplication.shared.applicationIconImage
     }
 }
 
