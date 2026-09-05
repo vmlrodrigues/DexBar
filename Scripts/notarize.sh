@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Notarises dist/DexBar.app, staples its ticket, and creates a signed, notarised DMG.
 #
-# Setup: copy .env.example to .env and fill it in, then run:
+# Setup: store validated credentials in the macOS Keychain once, then run:
 #
+#   xcrun notarytool store-credentials PersonalProjectsNotary --sync
 #   BUILD_CHANNEL=release SIGN=1 ./Scripts/build.sh
 #   ./Scripts/notarize.sh
 
@@ -13,7 +14,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="$ROOT/dist"
 APP="$DIST/$APP_NAME.app"
 DMG="$DIST/$APP_NAME.dmg"
-ENV_FILE="${ENV_FILE:-$ROOT/.env}"
+NOTARY_PROFILE="${NOTARY_KEYCHAIN_PROFILE:-PersonalProjectsNotary}"
 
 [ -d "$APP" ] || { echo "error: $APP not found — run Scripts/build.sh first" >&2; exit 1; }
 
@@ -28,22 +29,13 @@ CURRENT_REVISION="$(git -C "$ROOT" rev-parse --verify HEAD)"
 [ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ] \
     || { echo "error: release source has uncommitted or untracked files" >&2; exit 1; }
 
-[ -f "$ENV_FILE" ] || {
-    echo "error: no release environment at $ENV_FILE" >&2
-    echo "       copy $ROOT/.env.example to $ROOT/.env and fill it in" >&2
-    exit 1
-}
-
-# shellcheck disable=SC1090
-set -a; . "$ENV_FILE"; set +a
-
-: "${NOTARY_KEY:?.env must set NOTARY_KEY (path to the App Store Connect .p8)}"
-: "${NOTARY_KEY_ID:?.env must set NOTARY_KEY_ID}"
-: "${NOTARY_ISSUER:?.env must set NOTARY_ISSUER}"
 IDENTITY="${RELEASE_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
     | awk -F'"' '/Developer ID Application/{print $2; exit}')}"
 [ -n "$IDENTITY" ] || { echo "error: no Developer ID Application identity" >&2; exit 1; }
-[ -f "$NOTARY_KEY" ] || { echo "error: NOTARY_KEY file not found: $NOTARY_KEY" >&2; exit 1; }
+
+echo "==> Validating Apple notary credentials ($NOTARY_PROFILE)"
+xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null \
+    || { echo "error: Keychain notary profile '$NOTARY_PROFILE' is missing or invalid" >&2; exit 1; }
 
 echo "==> Verifying the app signature"
 codesign --verify --strict --deep --verbose=2 "$APP"
@@ -55,9 +47,7 @@ echo "==> [1/2] Notarising the app"
 rm -f "$ZIP"
 /usr/bin/ditto -c -k --keepParent "$APP" "$ZIP"
 xcrun notarytool submit "$ZIP" \
-    --key "$NOTARY_KEY" \
-    --key-id "$NOTARY_KEY_ID" \
-    --issuer "$NOTARY_ISSUER" \
+    --keychain-profile "$NOTARY_PROFILE" \
     --wait
 rm -f "$ZIP"
 xcrun stapler staple "$APP"
@@ -74,9 +64,7 @@ hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG" 
 
 codesign --force --sign "$IDENTITY" --timestamp "$DMG"
 xcrun notarytool submit "$DMG" \
-    --key "$NOTARY_KEY" \
-    --key-id "$NOTARY_KEY_ID" \
-    --issuer "$NOTARY_ISSUER" \
+    --keychain-profile "$NOTARY_PROFILE" \
     --wait
 xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"

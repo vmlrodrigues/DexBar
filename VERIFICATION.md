@@ -22,6 +22,7 @@ Verification updated on 5 September 2026.
 - The packaged `--version` check reports the semantic version, monotonic build number, build channel, and source revision without starting AppKit.
 - A development launch produced no Sparkle log activity; General Settings disables both Check Now and launch-at-login mutation.
 - The build script defaults to an ad-hoc development build, rejects ad-hoc release builds, rejects dirty release source, and refuses to replace the exact `dist/DexBar.app` executable while it is running.
+- Notarization validates and uses the shared `PersonalProjectsNotary` macOS Keychain profile; no App Store Connect private-key path, key ID, or issuer is stored in a project `.env` file.
 - The DexBar-specific private key was read back from the login Keychain through Sparkle's public-key command and successfully signed an existing disk image.
 - The release guard compares that Keychain account's public key with `SUPublicEDKey` before signing an update.
 - The appcast generator produces valid XML and a deterministic, idempotent signed release entry; all release shell scripts pass syntax checking.

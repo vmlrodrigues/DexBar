@@ -80,7 +80,18 @@ BUILD_CHANNEL=release SIGN=1 ./Scripts/build.sh  # clean Developer ID release bu
 PUBLISH=1 ./Scripts/release.sh  # publish the GitHub release and update appcast.xml
 ```
 
-Copy `.env.example` to `.env` first and provide an App Store Connect API key. The release guard refuses dirty source, development-channel builds, a source-revision mismatch, mismatched Git-derived build numbers, unpushed commits, unsigned artifacts, and unstapled artifacts. Published releases include a versioned DMG, a stable latest-download DMG, and a SHA-256 checksum.
+Store validated notarization credentials in the macOS Keychain once:
+
+```sh
+xcrun notarytool store-credentials PersonalProjectsNotary --sync
+```
+
+The release scripts use that shared profile by default; set `NOTARY_KEYCHAIN_PROFILE` only
+when deliberately using another validated profile. No App Store Connect private key or
+issuer metadata is copied into the repository. The release guard refuses dirty source,
+development-channel builds, a source-revision mismatch, mismatched Git-derived build
+numbers, unpushed commits, unsigned artifacts, and unstapled artifacts. Published releases
+include a versioned DMG, a stable latest-download DMG, and a SHA-256 checksum.
 
 The release is published before the script commits and pushes `appcast.xml`, so Sparkle
 never sees an enclosure URL that still returns 404. Publication succeeds only after the
