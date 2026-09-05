@@ -1,5 +1,4 @@
-// Generates dist/AppIcon.iconset. Convert it with:
-// iconutil -c icns dist/AppIcon.iconset -o Resources/AppIcon.icns
+// Generates the source iconset and the packaged Resources/AppIcon.icns.
 
 import AppKit
 
@@ -55,28 +54,56 @@ func makeIcon(_ size: CGFloat) -> CGImage {
         options: []
     )
 
-    let paragraph = NSMutableParagraphStyle()
-    paragraph.alignment = .center
-    let font = NSFont.systemFont(ofSize: size * 0.49, weight: .semibold)
-    let attributed = NSAttributedString(
-        string: "D",
-        attributes: [
-            .font: font,
-            .foregroundColor: NSColor.white,
-            .paragraphStyle: paragraph,
-        ]
+    // A geometric D whose bowl doubles as a usage gauge. Keeping the mark to one
+    // continuous stroke and one endpoint makes it survive the 16 px icon variant.
+    let leftX = tile.minX + tile.width * 0.31
+    let curveX = tile.minX + tile.width * 0.50
+    let outerX = tile.minX + tile.width * 0.73
+    let bottomY = tile.minY + tile.height * 0.28
+    let topY = tile.minY + tile.height * 0.72
+    let lineWidth = size * 0.080
+
+    let mark = CGMutablePath()
+    mark.move(to: CGPoint(x: leftX, y: bottomY))
+    mark.addLine(to: CGPoint(x: leftX, y: topY))
+    mark.addLine(to: CGPoint(x: curveX, y: topY))
+    mark.addCurve(
+        to: CGPoint(x: curveX, y: bottomY),
+        control1: CGPoint(x: outerX, y: topY),
+        control2: CGPoint(x: outerX, y: bottomY)
     )
-    let textSize = attributed.size()
-    let textRect = CGRect(
-        x: tile.midX - textSize.width / 2,
-        y: tile.midY - textSize.height / 2 - size * 0.006,
-        width: textSize.width,
-        height: textSize.height
+    mark.closeSubpath()
+
+    context.addPath(mark)
+    context.setLineWidth(lineWidth)
+    context.setLineJoin(.round)
+    context.setLineCap(.round)
+    context.setStrokeColor(NSColor.white.cgColor)
+    context.strokePath()
+
+    // The endpoint is placed on the upper shoulder of the same Bezier curve. A
+    // slim blue keyline keeps it legible where it overlaps the white gauge stroke.
+    let endpoint = CGPoint(
+        x: tile.minX + tile.width * 0.615,
+        y: tile.minY + tile.height * 0.675
     )
-    NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-    attributed.draw(in: textRect)
-    NSGraphicsContext.restoreGraphicsState()
+    let endpointRadius = size * 0.035
+    context.setFillColor(
+        NSColor(srgbRed: 0.08, green: 0.36, blue: 0.93, alpha: 0.92).cgColor
+    )
+    context.fillEllipse(in: CGRect(
+        x: endpoint.x - endpointRadius * 1.28,
+        y: endpoint.y - endpointRadius * 1.28,
+        width: endpointRadius * 2.56,
+        height: endpointRadius * 2.56
+    ))
+    context.setFillColor(NSColor.white.cgColor)
+    context.fillEllipse(in: CGRect(
+        x: endpoint.x - endpointRadius,
+        y: endpoint.y - endpointRadius,
+        width: endpointRadius * 2,
+        height: endpointRadius * 2
+    ))
     context.restoreGState()
 
     context.addPath(tilePath)
@@ -101,4 +128,42 @@ for (base, scale) in variants {
     let data = representation.representation(using: .png, properties: [:])!
     try data.write(to: iconset.appendingPathComponent(name))
 }
-print("wrote \(variants.count) icon images")
+
+// Modern ICNS files are a small big-endian container around PNG representations.
+// Include both 1x and Retina semantic types even when two entries share a pixel size;
+// Finder then selects the intended artwork instead of scaling an arbitrary variant.
+let chunks: [(type: String, file: String)] = [
+    ("icp4", "icon_16x16.png"),
+    ("ic11", "icon_16x16@2x.png"),
+    ("icp5", "icon_32x32.png"),
+    ("ic12", "icon_32x32@2x.png"),
+    ("ic07", "icon_128x128.png"),
+    ("ic13", "icon_128x128@2x.png"),
+    ("ic08", "icon_256x256.png"),
+    ("ic14", "icon_256x256@2x.png"),
+    ("ic09", "icon_512x512.png"),
+    ("ic10", "icon_512x512@2x.png"),
+]
+
+func appendBigEndian(_ value: UInt32, to data: inout Data) {
+    var encoded = value.bigEndian
+    withUnsafeBytes(of: &encoded) { data.append(contentsOf: $0) }
+}
+
+var body = Data()
+for chunk in chunks {
+    let type = Data(chunk.type.utf8)
+    precondition(type.count == 4)
+    let image = try Data(contentsOf: iconset.appendingPathComponent(chunk.file))
+    body.append(type)
+    appendBigEndian(UInt32(image.count + 8), to: &body)
+    body.append(image)
+}
+
+var icns = Data("icns".utf8)
+appendBigEndian(UInt32(body.count + 8), to: &icns)
+icns.append(body)
+let packagedIcon = root.appendingPathComponent("Resources/AppIcon.icns")
+try icns.write(to: packagedIcon, options: .atomic)
+
+print("wrote \(variants.count) icon images and \(packagedIcon.path)")
