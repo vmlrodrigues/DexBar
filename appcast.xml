@@ -3,6 +3,15 @@
   <channel>
     <title>DexBar</title>
     <item>
+      <title>0.1.4</title>
+      <link>https://github.com/vmlrodrigues/DexBar/releases/tag/v0.1.4</link>
+      <pubDate>Sat, 5 Sep 2026 13:52:12 +1000</pubDate>
+      <sparkle:version>11</sparkle:version>
+      <sparkle:shortVersionString>0.1.4</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/vmlrodrigues/DexBar/releases/download/v0.1.4/DexBar-0.1.4.dmg" type="application/octet-stream" length="2950706" sparkle:edSignature="uBPzbDnaTtQoxcO6ANDBRRuBEtjl2za3wlI6/nduuwcpOoFNeT53E2jMYs8Kg+50DaO44PFmbAf9zEYvkH/vAw==" />
+    </item>
+    <item>
       <title>0.1.3</title>
       <link>https://github.com/vmlrodrigues/DexBar/releases/tag/v0.1.3</link>
       <pubDate>Sat, 5 Sep 2026 12:54:05 +1000</pubDate>
