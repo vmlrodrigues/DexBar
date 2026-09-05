@@ -90,7 +90,8 @@ APPCAST_CANDIDATE="$ROOT/dist/appcast.xml"
 cp "$DMG" "$VERSIONED"
 (cd "$ROOT/dist" && shasum -a 256 "DexBar-$VERSION.dmg" > "DexBar-$VERSION.sha256")
 
-SIGN_UPDATE="$(find "$ROOT/.build/artifacts/sparkle" -type f -name sign_update 2>/dev/null | head -1)"
+SIGN_UPDATE="$(find "$ROOT/.build/artifacts/sparkle" -type f -name sign_update 2>/dev/null \
+    | sed -n '1p')"
 [ -x "$SIGN_UPDATE" ] \
     || { echo "error: Sparkle sign_update not found — run 'swift package resolve'" >&2; exit 1; }
 GENERATE_KEYS="$(dirname "$SIGN_UPDATE")/generate_keys"

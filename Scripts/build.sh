@@ -111,7 +111,8 @@ cp "$SPARKLE_LICENSE" "$APP/Contents/Resources/"
 
 # SwiftPM builds Sparkle but does not know how to place a dynamic framework inside the
 # hand-assembled .app bundle. `ditto` preserves the framework's symlink structure.
-SPARKLE_FW="$(find "$ROOT/.build/artifacts/sparkle" -type d -name 'Sparkle.framework' -path '*macos*' 2>/dev/null | head -1)"
+SPARKLE_FW="$(find "$ROOT/.build/artifacts/sparkle" -type d -name 'Sparkle.framework' \
+    -path '*macos*' 2>/dev/null | sed -n '1p')"
 if [ -n "$SPARKLE_FW" ]; then
     echo "==> Embedding Sparkle"
     mkdir -p "$APP/Contents/Frameworks"
@@ -122,7 +123,8 @@ else
 fi
 
 if [ "$SIGN" = "1" ]; then
-    IDENTITY="${IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/{print $2; exit}')}"
+    IDENTITY="${IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
+        | awk -F'"' '/Developer ID Application/ && !found {print $2; found=1}')}"
     [ -n "$IDENTITY" ] || { echo "error: no Developer ID Application identity" >&2; exit 1; }
 
     # Sparkle contains independently signed nested executables. Re-sign them from the

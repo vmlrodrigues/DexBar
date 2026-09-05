@@ -30,7 +30,7 @@ CURRENT_REVISION="$(git -C "$ROOT" rev-parse --verify HEAD)"
     || { echo "error: release source has uncommitted or untracked files" >&2; exit 1; }
 
 IDENTITY="${RELEASE_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
-    | awk -F'"' '/Developer ID Application/{print $2; exit}')}"
+    | awk -F'"' '/Developer ID Application/ && !found {print $2; found=1}')}"
 [ -n "$IDENTITY" ] || { echo "error: no Developer ID Application identity" >&2; exit 1; }
 
 echo "==> Validating Apple notary credentials ($NOTARY_PROFILE)"
@@ -39,7 +39,8 @@ xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null \
 
 echo "==> Verifying the app signature"
 codesign --verify --strict --deep --verbose=2 "$APP"
-codesign -dv --verbose=4 "$APP" 2>&1 | grep -q '^Authority=Developer ID Application:' \
+APP_SIGNATURE="$(codesign -dv --verbose=4 "$APP" 2>&1)"
+grep -q '^Authority=Developer ID Application:' <<< "$APP_SIGNATURE" \
     || { echo "error: app is not signed with a Developer ID Application identity" >&2; exit 1; }
 
 ZIP="$DIST/$APP_NAME-app.zip"
