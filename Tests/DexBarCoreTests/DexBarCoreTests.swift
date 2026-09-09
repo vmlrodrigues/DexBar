@@ -417,6 +417,43 @@ final class DexBarCoreTests: XCTestCase {
         XCTAssertEqual(compacted.count, 3)
     }
 
+    @MainActor
+    func testProjectionStorePreservesSlidingZeroResetBaselines() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DexBarProjection-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let first = now
+        let samples = [
+            ProjectionSample(
+                windowID: "codex.primary",
+                timestamp: first,
+                usedPercent: 0,
+                resetsAt: first.addingTimeInterval(7 * 86_400)
+            ),
+            ProjectionSample(
+                windowID: "codex.primary",
+                timestamp: first.addingTimeInterval(5 * 60),
+                usedPercent: 0,
+                resetsAt: first.addingTimeInterval(7 * 86_400 + 5 * 60)
+            ),
+            ProjectionSample(
+                windowID: "codex.primary",
+                timestamp: first.addingTimeInterval(20 * 60),
+                usedPercent: 0,
+                resetsAt: first.addingTimeInterval(7 * 86_400 + 20 * 60)
+            ),
+        ]
+        try JSONEncoder().encode(samples).write(to: url)
+
+        _ = ProjectionStore(url: url)
+
+        let compacted = try JSONDecoder().decode(
+            [ProjectionSample].self,
+            from: Data(contentsOf: url)
+        )
+        XCTAssertEqual(compacted, samples)
+    }
+
     func testProjectionSampleDecodesLegacyServiceTierField() throws {
         let sample = ProjectionSample(
             windowID: "codex.primary",

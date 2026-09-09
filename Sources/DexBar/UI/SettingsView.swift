@@ -95,9 +95,12 @@ struct SettingsView: View {
                             selected == item ? Color.accentColor.opacity(0.15) : Color.clear,
                             in: RoundedRectangle(cornerRadius: 6)
                         )
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(item.rawValue)
+                .focusable(false)
+                .focusEffectDisabled()
             }
             Spacer()
         }
@@ -284,7 +287,7 @@ struct SettingsView: View {
                 Divider()
                 settingsRow(
                     title: "History on this Mac",
-                    detail: "Stores percentages and reset timestamps for projection; no prompts, code, or account identifiers."
+                    detail: "Stores projection samples for eight days and daily usage history for thirteen weeks; no prompts, code, or account identifiers."
                 ) {
                     Button(clearedHistory ? "Cleared" : "Clear") {
                         model.clearHistory()

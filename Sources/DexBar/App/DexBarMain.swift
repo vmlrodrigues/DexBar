@@ -155,9 +155,27 @@ enum DexBarMain {
         case "current": projection = nil
         default: projection = Projection(projectedPercent: 74, pointsPerDay: 4.3, daysRemaining: 6.95, outlook: .onTrack, limitReachedAt: nil)
         }
-        let model = AppModel.preview(snapshot: snapshot, state: loadState, projection: projection)
+        let model = AppModel.preview(
+            snapshot: snapshot,
+            state: loadState,
+            projection: projection,
+            usageHistoryWindows: snapshot.map {
+                previewHistory(
+                    $0,
+                    includesResetExample: state == "history-reset",
+                    includesExtendedExample: state == "history-extended"
+                )
+            } ?? []
+        )
         render(
-            view: PopoverView(model: model, openSettings: {}, openSignIn: {}, quit: {}),
+            view: PopoverView(
+                model: model,
+                openSettings: {},
+                openSignIn: {},
+                quit: {},
+                initiallyShowsHistory: state.hasPrefix("history"),
+                initialHistoryWindowIndex: state == "history-reset" ? 1 : 0
+            ),
             path: path
         )
     }
@@ -170,7 +188,21 @@ enum DexBarMain {
         case "warning": weeklyPercent = 74
         case "critical": weeklyPercent = 96
         case "stale": weeklyPercent = 58
+        case "history", "history-reset": weeklyPercent = 4
+        case "history-extended": weeklyPercent = 0
         default: weeklyPercent = state == "current" ? 1 : 44
+        }
+        let reset: Date
+        if state == "history-extended" {
+            reset = now.addingTimeInterval(7 * 86_400)
+        } else if state == "history" || state == "history-reset" {
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: now)
+            let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+            let windowStart = yesterday.addingTimeInterval(20 * 3_600 + 40 * 60)
+            reset = windowStart.addingTimeInterval(7 * 86_400)
+        } else {
+            reset = now.addingTimeInterval(6 * 86_400 + 23 * 3_600)
         }
         let weekly = UsageWindow(
             id: "codex.primary",
@@ -178,7 +210,7 @@ enum DexBarMain {
             bucketName: "General",
             usedPercent: weeklyPercent,
             durationMinutes: 10_080,
-            resetsAt: now.addingTimeInterval(6 * 86_400 + 23 * 3_600)
+            resetsAt: reset
         )
         let supplementary: [UsageWindow]
         if state == "active" {
@@ -202,6 +234,105 @@ enum DexBarMain {
             resetCreditsAvailable: 0,
             fetchedAt: state == "stale" ? now.addingTimeInterval(-720) : now
         )
+    }
+
+    @MainActor
+    private static func previewHistory(
+        _ snapshot: UsageSnapshot,
+        includesResetExample: Bool = false,
+        includesExtendedExample: Bool = false
+    ) -> [UsageHistoryWindow] {
+        if includesExtendedExample {
+            let store = UsageHistoryStore.inMemory()
+            for offset in -9...0 {
+                let at = snapshot.fetchedAt.addingTimeInterval(Double(offset) * 86_400)
+                store.record(UsageSnapshot(
+                    weekly: UsageWindow(
+                        id: snapshot.weekly.id, bucketID: "codex", bucketName: "General",
+                        usedPercent: 0, durationMinutes: 10_080,
+                        resetsAt: at.addingTimeInterval(7 * 86_400)
+                    ),
+                    supplementary: [], planType: "pro", credits: nil,
+                    resetCreditsAvailable: 0, fetchedAt: at
+                ))
+            }
+            return store.windows(for: snapshot.weekly.id)
+        }
+        let calendar = Calendar.current
+        let now = snapshot.fetchedAt
+        let windowStart = snapshot.weekly.resetsAt.addingTimeInterval(
+            -TimeInterval(snapshot.weekly.durationMinutes * 60)
+        )
+        let values = [1.0, 3]
+        var cumulative = 0.0
+        let days = values.enumerated().compactMap { index, value -> DailyUsageRecord? in
+            guard let date = calendar.date(byAdding: .day, value: index, to: windowStart) else {
+                return nil
+            }
+            let dayStart = calendar.startOfDay(for: date)
+            let start = cumulative
+            cumulative += value
+            return DailyUsageRecord(
+                windowID: snapshot.weekly.id,
+                windowResetsAt: snapshot.weekly.resetsAt,
+                windowDurationMinutes: snapshot.weekly.durationMinutes,
+                dayStart: dayStart,
+                timeZoneIdentifier: calendar.timeZone.identifier,
+                startingPercent: start,
+                endingPercent: cumulative,
+                firstObservedAt: max(dayStart, windowStart),
+                lastObservedAt: min(now, dayStart.addingTimeInterval(86_399)),
+                coverage: .observed
+            )
+        }
+        let current = UsageHistoryWindow(
+            windowID: snapshot.weekly.id,
+            resetsAt: snapshot.weekly.resetsAt,
+            durationMinutes: snapshot.weekly.durationMinutes,
+            days: days,
+            startsAt: windowStart
+        )
+        guard includesResetExample else { return [current] }
+
+        let shortenedStart = windowStart.addingTimeInterval(-24 * 3_600)
+        let shortenedReset = shortenedStart.addingTimeInterval(7 * 86_400)
+        let shortenedDayStart = calendar.startOfDay(for: shortenedStart)
+        let shortenedDays = [
+            DailyUsageRecord(
+                windowID: snapshot.weekly.id,
+                windowResetsAt: shortenedReset,
+                windowDurationMinutes: snapshot.weekly.durationMinutes,
+                dayStart: shortenedDayStart,
+                timeZoneIdentifier: calendar.timeZone.identifier,
+                startingPercent: 0,
+                endingPercent: 6,
+                firstObservedAt: shortenedStart,
+                lastObservedAt: calendar.startOfDay(for: windowStart),
+                coverage: .observed,
+                windowStartedAt: shortenedStart
+            ),
+            DailyUsageRecord(
+                windowID: snapshot.weekly.id,
+                windowResetsAt: shortenedReset,
+                windowDurationMinutes: snapshot.weekly.durationMinutes,
+                dayStart: calendar.startOfDay(for: windowStart),
+                timeZoneIdentifier: calendar.timeZone.identifier,
+                startingPercent: 6,
+                endingPercent: 7,
+                firstObservedAt: calendar.startOfDay(for: windowStart),
+                lastObservedAt: windowStart,
+                coverage: .observed,
+                windowStartedAt: shortenedStart
+            ),
+        ]
+        let shortened = UsageHistoryWindow(
+            windowID: snapshot.weekly.id,
+            resetsAt: shortenedReset,
+            durationMinutes: snapshot.weekly.durationMinutes,
+            days: shortenedDays,
+            startsAt: shortenedStart
+        )
+        return [current, shortened]
     }
 
     @MainActor

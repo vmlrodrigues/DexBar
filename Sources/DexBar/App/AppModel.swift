@@ -13,6 +13,7 @@ enum LoadState: Equatable {
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot?
+    @Published private(set) var usageHistoryWindows: [UsageHistoryWindow] = []
     @Published private(set) var state: LoadState = .loading
     @Published private(set) var isRefreshing = false
 
@@ -21,15 +22,18 @@ final class AppModel: ObservableObject {
 
     private let client: CodexAppServerClient
     private let projectionStore: ProjectionStore
+    private let usageHistoryStore: UsageHistoryStore
     private var usesPreviewProjection = false
     private var previewProjection: Projection?
 
     init(
         client: CodexAppServerClient = CodexAppServerClient(),
-        projectionStore: ProjectionStore? = nil
+        projectionStore: ProjectionStore? = nil,
+        usageHistoryStore: UsageHistoryStore? = nil
     ) {
         self.client = client
         self.projectionStore = projectionStore ?? ProjectionStore()
+        self.usageHistoryStore = usageHistoryStore ?? UsageHistoryStore()
     }
 
     var weeklyProjection: Projection? {
@@ -47,6 +51,10 @@ final class AppModel: ObservableObject {
 
     var worstPercent: Int { snapshot?.worstPercent ?? 0 }
 
+    func usageHistory(for window: UsageWindow) -> [UsageHistoryWindow] {
+        usageHistoryWindows.filter { $0.windowID == window.id }
+    }
+
     func refresh() async {
         guard !isRefreshing else { return }
         isRefreshing = true
@@ -60,7 +68,13 @@ final class AppModel: ObservableObject {
             let fresh = try await client.fetch()
             snapshot = fresh
             state = .ok
+            usageHistoryStore.backfill(
+                samples: projectionStore.recordedSamples(for: fresh.weekly.id),
+                for: fresh.weekly
+            )
+            usageHistoryStore.record(fresh)
             projectionStore.record(fresh)
+            usageHistoryWindows = usageHistoryStore.windows(for: fresh.weekly.id)
             notifier.evaluate(snapshot: fresh, projection: weeklyProjection)
         } catch let error as CodexClientError {
             switch error {
@@ -82,19 +96,26 @@ final class AppModel: ObservableObject {
 
     func clearHistory() {
         projectionStore.clear()
+        usageHistoryStore.clear()
+        usageHistoryWindows = []
         onChange?()
     }
 
     static func preview(
         snapshot: UsageSnapshot?,
         state: LoadState = .ok,
-        projection: Projection? = nil
+        projection: Projection? = nil,
+        usageHistoryWindows: [UsageHistoryWindow] = []
     ) -> AppModel {
-        let model = AppModel(projectionStore: .inMemory())
+        let model = AppModel(
+            projectionStore: .inMemory(),
+            usageHistoryStore: .inMemory()
+        )
         model.snapshot = snapshot
         model.state = state
         model.usesPreviewProjection = true
         model.previewProjection = projection
+        model.usageHistoryWindows = usageHistoryWindows
         return model
     }
 }

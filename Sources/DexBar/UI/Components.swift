@@ -78,7 +78,7 @@ struct UsageMeter: View {
                         let count = over >= 75 ? 3 : (over >= 25 ? 2 : 1)
                         HStack(spacing: -2) {
                             ForEach(0..<count, id: \.self) { _ in
-                                Text("›").font(.system(size: 13, weight: .bold))
+                                Text("›").font(.system(size: 14, weight: .bold))
                             }
                         }
                         .foregroundStyle(projectionColor)
@@ -92,7 +92,7 @@ struct UsageMeter: View {
 
             if let projection, projection.projectedPercent > 100 {
                 Text("projected \(projection.projectedPercent)%")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: 10, weight: .medium))
                     .monospacedDigit()
                     .foregroundStyle(projectionColor)
                     .padding(.top, 3)
@@ -105,10 +105,10 @@ struct UsageMeter: View {
                     let flip = x + Self.caretGap + Self.labelWidth > geometry.size.width
                     ZStack(alignment: .topLeading) {
                         Text("▲")
-                            .font(.system(size: 7))
+                            .font(.system(size: 8))
                             .offset(x: max(0, x - 3))
                         Text("projected \(projection.projectedPercent)%")
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.system(size: 10, weight: .medium))
                             .monospacedDigit()
                             .frame(width: Self.labelWidth, alignment: flip ? .trailing : .leading)
                             .offset(x: flip ? x - Self.labelWidth - Self.caretGap : x + Self.caretGap)
@@ -186,31 +186,44 @@ struct UsageWindowRow: View {
     let window: UsageWindow
     var projection: Projection?
     var showContext = false
+    var historyHint = false
     let now: Date
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if showContext {
                 Text("\(window.bucketName) · active now")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
             }
             HStack(spacing: 6) {
                 Image(systemName: window.isWeekly ? "calendar" : "clock")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
                 Text(window.title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                 Spacer()
                 Text("\(window.roundedPercent)% used")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(window.health.color)
             }
             UsageMeter(window: window, projection: projection)
-            Text("Resets \(resetDescription(window.resetsAt, relativeTo: now)) · in \(shortDuration(window.resetsAt.timeIntervalSince(now)))")
-            .font(.system(size: 9))
+            HStack(spacing: 4) {
+                Text("Resets \(resetDescription(window.resetsAt, relativeTo: now)) · in \(shortDuration(window.resetsAt.timeIntervalSince(now)))")
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if historyHint {
+                    HStack(spacing: 1) {
+                        Text("History")
+                        Image(systemName: "chevron.right")
+                    }
+                    .fixedSize()
+                    .transition(.opacity)
+                }
+            }
+            .font(.system(size: 10))
             .foregroundStyle(.secondary)
         }
     }

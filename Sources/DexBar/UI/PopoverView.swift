@@ -2,13 +2,34 @@ import SwiftUI
 import DexBarCore
 
 struct PopoverView: View {
+    private static let minimumHistoryContentHeight: CGFloat = 102
+
     @ObservedObject var model: AppModel
     let openSettings: () -> Void
     let openSignIn: () -> Void
     let quit: () -> Void
+    private let initialHistoryWindowIndex: Int
 
     @State private var now = Date()
+    @State private var isShowingHistory: Bool
+    @State private var mainContentHeight: CGFloat = 0
     private let ticker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+
+    init(
+        model: AppModel,
+        openSettings: @escaping () -> Void,
+        openSignIn: @escaping () -> Void,
+        quit: @escaping () -> Void,
+        initiallyShowsHistory: Bool = false,
+        initialHistoryWindowIndex: Int = 0
+    ) {
+        self.model = model
+        self.openSettings = openSettings
+        self.openSignIn = openSignIn
+        self.quit = quit
+        self.initialHistoryWindowIndex = initialHistoryWindowIndex
+        _isShowingHistory = State(initialValue: initiallyShowsHistory)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,6 +41,10 @@ struct PopoverView: View {
         }
         .frame(width: 330)
         .onReceive(ticker) { now = $0 }
+        .onDisappear { isShowingHistory = false }
+        .onChange(of: model.snapshot?.weekly.id) { _, newValue in
+            if newValue == nil { isShowingHistory = false }
+        }
     }
 
     private var header: some View {
@@ -28,11 +53,11 @@ struct PopoverView: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text("DexBar")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .fixedSize()
                     if let accountBadge {
                         Text(accountBadge)
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.system(size: 10, weight: .medium))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(.secondary.opacity(0.12), in: Capsule())
@@ -40,7 +65,7 @@ struct PopoverView: View {
                             .fixedSize()
                     }
                 }
-                Text("Codex usage").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("Codex usage").font(.system(size: 11)).foregroundStyle(.secondary)
             }
             Spacer()
             Button {
@@ -67,6 +92,32 @@ struct PopoverView: View {
 
     @ViewBuilder
     private var content: some View {
+        if isShowingHistory, let snapshot = model.snapshot {
+            UsageHistoryView(
+                windows: model.usageHistory(for: snapshot.weekly),
+                now: now,
+                dismiss: { withAnimation(.easeOut(duration: 0.12)) { isShowingHistory = false } },
+                initialWindowIndex: initialHistoryWindowIndex
+            )
+            .frame(height: max(mainContentHeight, Self.minimumHistoryContentHeight))
+        } else {
+            mainContent
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: PopoverContentHeightKey.self,
+                            value: geometry.size.height
+                        )
+                    }
+                }
+                .onPreferenceChange(PopoverContentHeightKey.self) { height in
+                    if height > 0 { mainContentHeight = height }
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
         if let snapshot = model.snapshot {
             VStack(spacing: 0) {
                 if case .needsAuthentication = model.state {
@@ -87,11 +138,21 @@ struct PopoverView: View {
                     stateBanner(message, symbol: "wifi.exclamationmark", color: .orange)
                 }
                 VStack(spacing: 14) {
-                    UsageWindowRow(
-                        window: snapshot.weekly,
-                        projection: model.weeklyProjection,
-                        now: now
-                    )
+                    Button {
+                        withAnimation(.easeOut(duration: 0.12)) { isShowingHistory = true }
+                    } label: {
+                        UsageWindowRow(
+                            window: snapshot.weekly,
+                            projection: model.weeklyProjection,
+                            historyHint: true,
+                            now: now
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show daily usage history")
+                    .accessibilityLabel("Weekly usage. Show daily history.")
+                    .mouseOnlyPopoverControl()
                     ForEach(snapshot.supplementary) { window in
                         Divider()
                         UsageWindowRow(
@@ -113,7 +174,7 @@ struct PopoverView: View {
                         Text(credits.unlimited ? "Unlimited" : (credits.balance ?? "Available"))
                             .fontWeight(.medium)
                     }
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                 }
@@ -154,7 +215,7 @@ struct PopoverView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             Text(bundleVersionString())
-                .font(.system(size: 9))
+                .font(.system(size: 10))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .help("Version and build number. The build number is what Sparkle compares when checking for updates.")
@@ -165,7 +226,7 @@ struct PopoverView: View {
                     .fill(freshnessColor)
                     .frame(width: 5, height: 5)
                 Text(freshnessText)
-                    .font(.system(size: 9))
+                    .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
@@ -203,7 +264,7 @@ struct PopoverView: View {
 
     private func stateBanner(_ text: String, symbol: String, color: Color) -> some View {
         Label(text, systemImage: symbol)
-            .font(.system(size: 10))
+            .font(.system(size: 11))
             .foregroundStyle(color)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
@@ -224,7 +285,7 @@ struct PopoverView: View {
                 .controlSize(.small)
                 .mouseOnlyPopoverControl()
         }
-        .font(.system(size: 10))
+        .font(.system(size: 11))
         .foregroundStyle(.orange)
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
@@ -236,9 +297,9 @@ struct PopoverView: View {
             Image(systemName: "person.crop.circle.badge.exclamationmark")
                 .font(.system(size: 25))
                 .foregroundStyle(.secondary)
-            Text(title).font(.system(size: 13, weight: .semibold))
+            Text(title).font(.system(size: 14, weight: .semibold))
             Text(message)
-                .font(.system(size: 10))
+                .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button(button, action: action)
@@ -247,6 +308,13 @@ struct PopoverView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(24)
+    }
+}
+
+private struct PopoverContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

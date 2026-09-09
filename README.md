@@ -43,6 +43,8 @@ surface only when Codex reports that they matter.
   with inactive or low-usage meters.
 - A local weekly projection after 24 hours of history for the same reset window. When enough
   recent movement exists, DexBar blends the full-window pace with a recency-weighted trend.
+- A compact daily history for the current and recent weekly windows, including honest markers
+  when this Mac did not observe enough data to attribute usage to an exact day.
 - A deliberately quiet short-window projection after one hour, shown only when it points to
   at least 60% usage by reset.
 - The ChatGPT plan and default Codex service mode—Standard, Fast, or Ultra Fast—when the local
@@ -55,6 +57,37 @@ surface only when Codex reports that they matter.
 The menu bar normally represents the weekly window. If an active supplementary window becomes
 more urgent, DexBar automatically surfaces that window instead. Its text can be configured as
 percentage and time, time and percentage, percentage only, or time only.
+
+## Daily history
+
+Open **History**—or select the weekly meter—to see how much of the current allowance was used
+on each local calendar day. Future days remain visible as quiet placeholders, while boundary
+times make partial first and last days explicit. Extended windows open with today visible;
+small arrows beside the daily strip provide access to earlier and later days. If readings
+were recorded in different time zones, a time-zone menu keeps each zone's days accessible
+with their original calendar boundaries.
+
+<p align="center">
+  <a href="Docs/DexBar-history-current.png"><img src="Docs/DexBar-history-current.png" width="600" alt="DexBar daily history showing the current usage week"></a>
+</p>
+
+<p align="center"><sub>The current usage week, with future days left visible.</sub></p>
+
+If OpenAI starts a new allowance before the advertised reset, DexBar closes the previous window
+at the reported boundary when known, or the first observed replacement otherwise, and marks
+it as an early reset. The usage response does not say why an individual reset occurred, so
+DexBar reports the event without guessing at its cause.
+
+<p align="center">
+  <a href="Docs/DexBar-history-reset.png"><img src="Docs/DexBar-history-reset.png" width="600" alt="DexBar daily history identifying an early usage-window reset"></a>
+</p>
+
+<p align="center"><sub>A shortened week clearly identified as an early reset.</sub></p>
+
+History is calculated from readings stored on this Mac. Usage from another computer, or gaps
+while DexBar is not running, may therefore be marked as estimated, partial, or unavailable.
+Completed windows show the last observed percentage rather than claiming a final total that
+this Mac may not have seen.
 
 ## When another limit matters
 
@@ -97,10 +130,12 @@ and the effective default service mode. It reuses the existing Codex sign-in but
 or copy authentication tokens into its own files or logs. Checking usage does not send a prompt,
 consume allowance, or start a usage window.
 
-For projection, DexBar stores only window identifiers, usage percentages, timestamps, and reset
-dates in `~/Library/Application Support/DexBar/projection-history.json`. The history is retained
-for eight days and can be cleared from **Settings → Data & Privacy**. It contains no prompts,
-source code, account identifiers, or service-mode history.
+For projection and daily history, DexBar stores only window identifiers, usage percentages,
+timestamps, reset dates, and local-day boundaries. Projection samples are retained for eight days
+in `~/Library/Application Support/DexBar/projection-history.json`; compact daily records are retained
+for thirteen weeks in `~/Library/Application Support/DexBar/usage-history.json`. Both can be cleared
+from **Settings → Data & Privacy**. Neither file contains prompts, source code, account identifiers,
+or service-mode history.
 
 DexBar watches filesystem-change notifications beneath `~/.codex/sessions` solely to choose a
 fresher polling interval after Codex activity. It does not open or read the session contents.

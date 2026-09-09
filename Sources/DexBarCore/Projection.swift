@@ -243,6 +243,8 @@ public enum ProjectionCalculator {
 public final class ProjectionStore {
     private var samples: [ProjectionSample]
     private let url: URL?
+    // Quiet observations are evidence for the recent-pace estimate too. Keep
+    // hourly samples, and preserve changed reset timestamps even at zero usage.
     private static let minimumWriteGap: TimeInterval = 60 * 60
     private static let resetTolerance: TimeInterval = 60
     private static let retention: TimeInterval = 8 * 86_400
@@ -311,6 +313,14 @@ public final class ProjectionStore {
             now: now,
             kind: window.isWeekly ? .weekly : .short
         )
+    }
+
+    /// A read-only copy used to seed the daily history introduced after projection
+    /// sampling was already shipping. Projection remains the owner of this file.
+    public func recordedSamples(for windowID: String) -> [ProjectionSample] {
+        samples
+            .filter { $0.windowID == windowID }
+            .sorted { $0.timestamp < $1.timestamp }
     }
 
     public func clear() {
