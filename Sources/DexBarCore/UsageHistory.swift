@@ -4,7 +4,6 @@ private enum UsageHistoryConstants {
     static let schemaVersion = 1
     static let resetTolerance: TimeInterval = 60
     static let midnightObservationTolerance: TimeInterval = 15 * 60
-    static let defaultRetention: TimeInterval = 13 * 7 * 86_400
 }
 
 public enum DailyUsageCoverage: String, Codable, Equatable, Sendable {
@@ -111,8 +110,8 @@ public struct UsageHistoryWindow: Equatable, Identifiable, Sendable {
         }
     }
 
-    /// Each recorded time zone is a separate calendar view of the same allowance.
-    /// Never reinterpret a stored day's total against another zone's midnight.
+    /// Zones present in this derived view (or in a legacy summary during migration).
+    /// Recalculate from readings to present another zone; never relabel a daily total.
     public func historyTimeZones(including current: TimeZone? = nil) -> [TimeZone] {
         var identifiers = Set(days.map(\.timeZoneIdentifier))
         if let current { identifiers.insert(current.identifier) }
@@ -160,8 +159,9 @@ public struct UsageHistoryWindow: Equatable, Identifiable, Sendable {
     }
 }
 
-@MainActor
-public final class UsageHistoryStore {
+/// Pure local-calendar aggregation, also used to decode and repair v1 summaries.
+/// Its daily records are never written by the v2 store.
+final class UsageHistoryAccumulator {
     private struct Observation: Codable, Equatable {
         let windowID: String
         let timestamp: Date
@@ -188,93 +188,50 @@ public final class UsageHistoryStore {
         )
     }
 
-    private var document: Document
-    private let url: URL?
+    private var document: Document = .empty
     private let calendar: Calendar
-    private let retention: TimeInterval
 
-    public convenience init() {
-        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("DexBar", isDirectory: true)
-        self.init(url: directory.appendingPathComponent("usage-history.json"))
+    init(calendar: Calendar) { self.calendar = calendar }
+
+    init(legacyData: Data) throws {
+        calendar = Calendar(identifier: .gregorian)
+        document = try JSONDecoder().decode(Document.self, from: legacyData)
+        guard document.schemaVersion == 1 else { throw CocoaError(.coderReadCorrupt) }
+        repairSlidingZeroCycles()
     }
 
-    public init(
-        url: URL,
-        calendar: Calendar = .autoupdatingCurrent,
-        retention: TimeInterval = 13 * 7 * 86_400
-    ) {
-        self.url = url
-        self.calendar = calendar
-        self.retention = retention
-        try? FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+    var legacyDays: [DailyUsageRecord] { document.days }
+
+    var legacyLatest: [ProjectionSample] {
+        document.latestObservations.map {
+            ProjectionSample(windowID: $0.windowID, timestamp: $0.timestamp,
+                             usedPercent: $0.usedPercent, resetsAt: $0.resetsAt)
+        }
+    }
+
+    func append(_ reading: UsageHistoryReading) {
+        let previous = document.latestObservations.first { $0.windowID == reading.windowID }
+        let observation = Observation(
+            windowID: reading.windowID, timestamp: reading.timestamp,
+            usedPercent: reading.usedPercent, resetsAt: reading.resetsAt,
+            durationMinutes: reading.durationMinutes, timeZoneIdentifier: calendar.timeZone.identifier,
+            cycleStartedAt: reading.cycleStartedAt
         )
-        if let data = try? Data(contentsOf: url),
-           let decoded = try? JSONDecoder().decode(Document.self, from: data),
-           decoded.schemaVersion == UsageHistoryConstants.schemaVersion {
-            document = decoded
-            let original = document
-            repairSlidingZeroCycles()
-            if document != original {
-                persist()
-            }
+        if let previous, previous.effectiveCycleStart == reading.cycleStartedAt {
+            updateCycleMetadata(for: observation)
+            advance(from: previous, to: observation)
         } else {
-            document = .empty
+            // An unchanged reset schedule gives a time interval, not an exact
+            // reset instant. If both ends fall on this local day, its entire new
+            // allowance consumption still belongs to the day.
+            let resetKnownToday = calendar.isDate(reading.cycleStartedAt, inSameDayAs: reading.timestamp)
+                && (reading.cycleStartKnown || previous.map {
+                    calendar.isDate($0.timestamp, inSameDayAs: reading.timestamp)
+                } == true)
+            startCycle(with: observation, resetKnownToday: resetKnownToday)
         }
-    }
-
-    private init(calendar: Calendar) {
-        url = nil
-        self.calendar = calendar
-        retention = UsageHistoryConstants.defaultRetention
-        document = .empty
-    }
-
-    public static func inMemory(calendar: Calendar = .autoupdatingCurrent) -> UsageHistoryStore {
-        UsageHistoryStore(calendar: calendar)
-    }
-
-    public func record(_ snapshot: UsageSnapshot) {
-        let shouldPersist = requiresPersistence(
-            windowID: snapshot.weekly.id,
-            usedPercent: snapshot.weekly.usedPercent,
-            resetsAt: snapshot.weekly.resetsAt,
-            durationMinutes: snapshot.weekly.durationMinutes,
-            timestamp: snapshot.fetchedAt
-        )
-        ingest(
-            windowID: snapshot.weekly.id,
-            usedPercent: snapshot.weekly.usedPercent,
-            resetsAt: snapshot.weekly.resetsAt,
-            durationMinutes: snapshot.weekly.durationMinutes,
-            timestamp: snapshot.fetchedAt
-        )
-        guard shouldPersist else { return }
-        trim(relativeTo: snapshot.fetchedAt)
-        persist()
-    }
-
-    /// Seeds a newly-created history document from the short projection history
-    /// already present on an upgraded installation. Existing daily history always
-    /// wins, so this is safe to call on every launch.
-    public func backfill(samples: [ProjectionSample], for window: UsageWindow) {
-        guard !document.days.contains(where: { $0.windowID == window.id }) else { return }
-        for sample in samples
-            .filter({ $0.windowID == window.id })
-            .sorted(by: { $0.timestamp < $1.timestamp }) {
-            ingest(
-                windowID: sample.windowID,
-                usedPercent: sample.usedPercent,
-                resetsAt: sample.resetsAt,
-                durationMinutes: window.durationMinutes,
-                timestamp: sample.timestamp
-            )
-        }
-        guard !samples.isEmpty else { return }
-        trim(relativeTo: samples.map(\.timestamp).max() ?? Date())
-        persist()
+        document.latestObservations.removeAll { $0.windowID == reading.windowID }
+        document.latestObservations.append(observation)
     }
 
     public func windows(for windowID: String) -> [UsageHistoryWindow] {
@@ -292,93 +249,6 @@ public final class UsageHistoryStore {
             )
         }
         .sorted { $0.startsAt > $1.startsAt }
-    }
-
-    public func clear() {
-        document = .empty
-        if let url {
-            try? FileManager.default.removeItem(at: url)
-        }
-    }
-
-    private func requiresPersistence(
-        windowID: String,
-        usedPercent: Double,
-        resetsAt: Date,
-        durationMinutes: Int,
-        timestamp: Date
-    ) -> Bool {
-        guard let previous = document.latestObservations.first(where: { $0.windowID == windowID }) else {
-            return true
-        }
-        return abs(previous.resetsAt.timeIntervalSince(resetsAt)) >= UsageHistoryConstants.resetTolerance
-            || previous.durationMinutes != durationMinutes
-            || previous.usedPercent != usedPercent
-            || previous.timeZoneIdentifier != calendar.timeZone.identifier
-            || !calendar.isDate(previous.timestamp, inSameDayAs: timestamp)
-    }
-
-    private func ingest(
-        windowID: String,
-        usedPercent: Double,
-        resetsAt: Date,
-        durationMinutes: Int,
-        timestamp: Date
-    ) {
-        guard usedPercent.isFinite, durationMinutes > 0 else { return }
-        guard timestamp <= resetsAt.addingTimeInterval(UsageHistoryConstants.resetTolerance) else { return }
-
-        let percent = max(0, usedPercent)
-        let timeZoneIdentifier = calendar.timeZone.identifier
-        let previousIndex = document.latestObservations.firstIndex { $0.windowID == windowID }
-        let previous = previousIndex.map { document.latestObservations[$0] }
-        guard previous == nil || timestamp >= previous!.timestamp else { return }
-
-        let sameWindow = previous.map {
-            isSameCycle(
-                previous: $0,
-                usedPercent: percent,
-                resetsAt: resetsAt,
-                durationMinutes: durationMinutes,
-                timestamp: timestamp
-            )
-        } ?? false
-        let cycleStart = sameWindow
-            ? (date: previous!.effectiveCycleStart, known: true)
-            : detectedCycleStart(
-                resetsAt: resetsAt,
-                durationMinutes: durationMinutes,
-                timestamp: timestamp,
-                previous: previous
-            )
-        let observation = Observation(
-            windowID: windowID,
-            timestamp: timestamp,
-            usedPercent: percent,
-            resetsAt: resetsAt,
-            durationMinutes: durationMinutes,
-            timeZoneIdentifier: timeZoneIdentifier,
-            cycleStartedAt: cycleStart.date
-        )
-
-        if let previous, sameWindow {
-            updateCycleMetadata(for: observation)
-            advance(from: previous, to: observation)
-        } else {
-            // When a reset boundary is inferred from the first new reading,
-            // only a same-day preceding reading proves the reset happened today.
-            let resetKnownToday = calendar.isDate(cycleStart.date, inSameDayAs: timestamp)
-                && (cycleStart.known || previous.map {
-                    calendar.isDate($0.timestamp, inSameDayAs: timestamp)
-                } == true)
-            startCycle(with: observation, resetKnownToday: resetKnownToday)
-        }
-
-        if let previousIndex {
-            document.latestObservations[previousIndex] = observation
-        } else {
-            document.latestObservations.append(observation)
-        }
     }
 
     private func startCycle(with observation: Observation, resetKnownToday: Bool) {
@@ -569,56 +439,6 @@ public final class UsageHistoryStore {
         }
     }
 
-    private func trim(relativeTo now: Date) {
-        let cutoff = now.addingTimeInterval(-retention)
-        document.days.removeAll { $0.dayStart < cutoff }
-    }
-
-    private func isSameCycle(
-        previous: Observation,
-        usedPercent: Double,
-        resetsAt: Date,
-        durationMinutes: Int,
-        timestamp: Date
-    ) -> Bool {
-        guard previous.durationMinutes == durationMinutes,
-              usedPercent >= previous.usedPercent else {
-            return false
-        }
-        if abs(previous.resetsAt.timeIntervalSince(resetsAt)) < UsageHistoryConstants.resetTolerance {
-            return true
-        }
-        let reportedStart = resetsAt.addingTimeInterval(-TimeInterval(durationMinutes * 60))
-        // Usage may have overtaken our last reading after a reset while this Mac
-        // was offline. A new start after a positive observation separates those
-        // allowances even without a visible percentage drop. Keep the tolerance
-        // for timestamp jitter, and leave sliding zero windows in one cycle.
-        if previous.usedPercent > 0,
-           reportedStart > previous.timestamp.addingTimeInterval(UsageHistoryConstants.resetTolerance),
-           reportedStart <= timestamp.addingTimeInterval(UsageHistoryConstants.resetTolerance) {
-            return false
-        }
-        return timestamp < previous.resetsAt
-    }
-
-    private func detectedCycleStart(
-        resetsAt: Date,
-        durationMinutes: Int,
-        timestamp: Date,
-        previous: Observation?
-    ) -> (date: Date, known: Bool) {
-        let reportedStart = resetsAt.addingTimeInterval(-TimeInterval(durationMinutes * 60))
-        // A reported boundary after our preceding reading remains useful even
-        // when this Mac was asleep for days before discovering the new cycle.
-        if reportedStart <= timestamp.addingTimeInterval(UsageHistoryConstants.resetTolerance),
-           previous == nil || reportedStart > previous!.timestamp {
-            return (reportedStart, true)
-        }
-        // A drop with an unchanged/old reset schedule only tells us that the
-        // replacement exists by this poll. It does not establish its start day.
-        return (timestamp, false)
-    }
-
     private func updateCycleMetadata(for observation: Observation) {
         for index in document.days.indices where
             document.days[index].windowID == observation.windowID
@@ -724,8 +544,4 @@ public final class UsageHistoryStore {
         "\(windowID)|\(Int(startedAt.timeIntervalSince1970.rounded()))"
     }
 
-    private func persist() {
-        guard let url, let data = try? JSONEncoder().encode(document) else { return }
-        try? data.write(to: url, options: .atomic)
-    }
 }

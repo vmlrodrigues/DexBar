@@ -24,8 +24,9 @@ SwiftUI and AppKit, contains no web view, and stays out of the Dock. The normal 
 deliberately quiet: weekly usage remains primary, while shorter or model-specific limits
 surface only when Codex reports that they matter.
 
-Version **0.2.1** adds arrow-key navigation between weekly usage and daily history.
-See the [0.2.1 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.2.1).
+Version **0.2.2** stores usage history in UTC and recalculates daily totals in your Mac’s
+current time zone, preserving history as you travel.
+See the [0.2.2 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.2.2).
 
 <p align="center">
   <a href="Docs/DexBar-current.png"><img src="Docs/DexBar-current.png" width="600" alt="DexBar showing the minimal weekly usage view"></a>
@@ -67,9 +68,11 @@ Open **History**—or select the weekly meter—to see how much of the current a
 on each local calendar day. With the popover open, press **Right Arrow** to open daily history
 and **Left Arrow** to return to the weekly view. Future days remain visible as quiet placeholders,
 while boundary times make partial first and last days explicit. Extended windows open with today visible;
-small arrows beside the daily strip provide access to earlier and later days. If readings
-were recorded in different time zones, a time-zone menu keeps each zone's days accessible
-with their original calendar boundaries.
+small arrows beside the daily strip provide access to earlier and later days. Readings are
+stored as absolute UTC timestamps. All daily totals and date labels are calculated in your
+Mac’s current time zone and update when it changes, including during travel. Day lengths
+follow the local calendar, including daylight-saving transitions. The time-zone label shows
+which zone is being used; changing zones does not discard readings or restart tracking.
 
 Use the arrows beside the date range to move between allowance windows. Background refreshes
 keep the selected window in place while it remains in the stored history.
@@ -147,12 +150,22 @@ or copy authentication tokens into its own files or logs. Checking usage does no
 consume allowance, or start a usage window.
 
 For projection and daily history, DexBar stores window identifiers, usage percentages,
-timestamps, reset dates, window durations, local-day boundaries, time-zone identifiers, and
-coverage markers. Projection samples are retained for eight days
-in `~/Library/Application Support/DexBar/projection-history.json`; compact daily records are retained
-for thirteen weeks in `~/Library/Application Support/DexBar/usage-history.json`. Both can be cleared
-from **Settings → Data & Privacy**. Neither file contains prompts, source code, account identifiers,
-or service-mode history.
+absolute UTC timestamps, reset dates, and window durations. Projection samples are retained
+for eight days in `~/Library/Application Support/DexBar/projection-history.json`; usage readings
+are retained for thirteen weeks in `~/Library/Application Support/DexBar/usage-readings.json`
+(with one preceding baseline for retained cycles). Local days and coverage markers are derived
+for display, rather than saved separately for each time zone.
+
+The former `usage-history.json` is migrated automatically, with an untouched backup in the same
+directory. The new filename protects UTC history if an older DexBar is launched accidentally.
+Migration recovers observations from the old daily summaries and available projection samples.
+Known old daily totals are also retained as separate summary evidence with UTC interval bounds,
+so missing raw samples do not erase those totals in their original calendar days. These summaries
+are never converted into invented timestamped readings. Migration cannot recover the precise
+timing of every past increase, so some older totals may be estimated or incomplete when viewed
+in a different time zone. Both histories and automatic
+migration backups can be cleared from **Settings → Data & Privacy**. These files contain no
+prompts, source code, account identifiers, or service-mode history.
 
 DexBar watches filesystem-change notifications beneath `~/.codex/sessions` solely to choose a
 fresher polling interval after Codex activity. It does not open or read the session contents.
@@ -185,8 +198,8 @@ development build: its menu-bar symbol is a hammer, automatic updates and login-
 are disabled, and the About pane identifies it as Development. The build script refuses to
 replace that exact development bundle while it is running.
 
-The number in parentheses after the version is the build number: **0.2.1 (19)** is the published
-0.2.1 release. Builds derive this number from the Git commit count, so new commits increase it;
+The number in parentheses after the version is the build number: **0.2.2 (21)** identifies the
+0.2.2 release. Builds derive this number from the Git commit count, so new commits increase it;
 rebuilding the same commit keeps the same number. Sparkle uses it to compare updates.
 
 Regenerate every standard and Retina icon representation, plus `Resources/AppIcon.icns`, with:

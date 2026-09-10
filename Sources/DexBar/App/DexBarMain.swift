@@ -90,6 +90,10 @@ enum DexBarMain {
             return
         }
 
+        // Finder and shell launches must both follow the Mac's system time zone.
+        // A tool's TZ override must not pin the live app while the user travels.
+        unsetenv("TZ")
+        NSTimeZone.resetSystemTimeZone()
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
         MainActor.assumeIsolated {

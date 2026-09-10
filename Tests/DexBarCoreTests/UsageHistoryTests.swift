@@ -265,10 +265,17 @@ final class UsageHistoryTests: XCTestCase {
                 XCTAssertEqual(expected.count, 2, context)
 
                 if format != "current" {
-                    var document = try XCTUnwrap(
-                        JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
-                    )
-                    var days = try XCTUnwrap(document["days"] as? [[String: Any]])
+                    let encodedDays = try JSONEncoder().encode(expected.flatMap(\.days))
+                    var days = try XCTUnwrap(JSONSerialization.jsonObject(with: encodedDays) as? [[String: Any]])
+                    var document: [String: Any] = [
+                        "schemaVersion": 1,
+                        "latestObservations": [[
+                            "windowID": "codex.primary", "timestamp": replacementAt.timeIntervalSinceReferenceDate,
+                            "usedPercent": 0, "resetsAt": replacementReset.timeIntervalSinceReferenceDate,
+                            "durationMinutes": newDays * 1_440, "timeZoneIdentifier": "GMT",
+                            "cycleStartedAt": replacementAt.timeIntervalSinceReferenceDate,
+                        ]],
+                    ]
                     for index in days.indices where format == "legacy" || index == 0 {
                         days[index].removeValue(forKey: "windowStartedAt")
                     }
@@ -316,7 +323,7 @@ final class UsageHistoryTests: XCTestCase {
         let object = try XCTUnwrap(
             try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
         )
-        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(object["schemaVersion"] as? Int, 2)
 
         store = UsageHistoryStore(url: url, calendar: utcCalendar)
         XCTAssertEqual(store?.windows(for: "codex.primary").first?.days.count, 1)
@@ -353,7 +360,7 @@ final class UsageHistoryTests: XCTestCase {
     }
 
     @MainActor
-    func testUnchangedSameDayPollDoesNotRewriteHistory() throws {
+    func testQuietPollIsPersistedForFutureTimeZoneBaselines() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("DexBarHistory-\(UUID().uuidString)", isDirectory: true)
         let url = directory.appendingPathComponent("usage-history.json")
@@ -365,10 +372,10 @@ final class UsageHistoryTests: XCTestCase {
         store?.record(snapshot(percent: 10, at: first, reset: reset))
         let firstData = try Data(contentsOf: url)
         store?.record(snapshot(percent: 10, at: date("2026-09-01T09:05:00Z"), reset: reset))
-        XCTAssertEqual(try Data(contentsOf: url), firstData)
+        XCTAssertNotEqual(try Data(contentsOf: url), firstData)
 
         store = UsageHistoryStore(url: url, calendar: utcCalendar)
-        XCTAssertEqual(store?.windows(for: "codex.primary").first?.days.first?.lastObservedAt, first)
+        XCTAssertEqual(store?.windows(for: "codex.primary").first?.days.first?.lastObservedAt, date("2026-09-01T09:05:00Z"))
     }
 
     @MainActor
@@ -418,7 +425,7 @@ final class UsageHistoryTests: XCTestCase {
         let object = try XCTUnwrap(
             try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
         )
-        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(object["schemaVersion"] as? Int, 2)
         XCTAssertEqual(store.windows(for: "codex.primary").count, 1)
     }
 
@@ -452,7 +459,7 @@ final class UsageHistoryTests: XCTestCase {
     }
 
     @MainActor
-    func testTimeZoneChangeKeepsCycleAndUsesLocalPartialBaselineAcrossReloads() throws {
+    func testTimeZoneChangeRecalculatesFromTheSameReadingsAcrossReloads() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("DexBarTravel-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("history.json")
@@ -471,9 +478,9 @@ final class UsageHistoryTests: XCTestCase {
         XCTAssertEqual(windows.count, 1)
         XCTAssertEqual(windows[0].id, originalID)
         let local = try XCTUnwrap(windows[0].record(on: sydney.startOfDay(for: date("2026-09-01T11:00:00Z")), timeZone: sydney.timeZone))
-        XCTAssertEqual(local.coverage, .partial)
-        XCTAssertEqual(local.startingPercent, 15)
-        XCTAssertEqual(local.usedPercent, 2)
+        XCTAssertEqual(local.coverage, .observed)
+        XCTAssertEqual(local.startingPercent, 0)
+        XCTAssertEqual(local.usedPercent, 17)
         // UTC's midnight is later in absolute time, but its observation is older.
         XCTAssertEqual(windows[0].lastObservedDay?.endingPercent, 17)
         XCTAssertEqual(windows[0].completedDescription(resetEarly: false), "Week ended · last seen 17%")
@@ -578,7 +585,7 @@ final class UsageHistoryTests: XCTestCase {
     }
 
     @MainActor
-    func testAllRecordedDaysRemainReachableAcrossTravelReturnAndReload() throws {
+    func testAllReadingsAreRebinnedAfterTravelReturnAndReload() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("DexBarTravelViews-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("history.json")
@@ -590,40 +597,26 @@ final class UsageHistoryTests: XCTestCase {
             ("Pacific/Honolulu", "2026-09-03T10:00:00Z", 30),
             ("GMT", "2026-09-04T09:00:00Z", 35),
         ]
-        var expectedRecords: [String: DailyUsageRecord] = [:]
         for (identifier, timestamp, percent) in readings {
             var local = utcCalendar
             local.timeZone = TimeZone(identifier: identifier)!
             let store = UsageHistoryStore(url: url, calendar: local)
             store.record(snapshot(percent: percent, at: date(timestamp), reset: reset))
-            let windows = store.windows(for: "codex.primary")
-            XCTAssertEqual(windows.count, 1)
-            let window = try XCTUnwrap(windows.first)
-            let record = try XCTUnwrap(window.record(on: local.startOfDay(for: date(timestamp)), timeZone: local.timeZone))
-            expectedRecords[record.id] = record
-            XCTAssertEqual(window.lastObservedDay(in: local.timeZone)?.endingPercent, percent)
-            var visibleRecords: [String: DailyUsageRecord] = [:]
-            // Exercise the same zone choices, calendar pages, and record lookup as
-            // the UI, including a current zone with no observations yet.
-            for zone in window.historyTimeZones(including: TimeZone(identifier: "Pacific/Kiritimati")) {
-                var calendar = utcCalendar
-                calendar.timeZone = zone
-                let count = window.calendarDays(endingAt: reset, calendar: calendar).count
-                for offset in stride(from: 0, through: count, by: 8) {
-                    for day in window.calendarDayPage(endingAt: reset, calendar: calendar, offsetFromEnd: offset) {
-                        if let visible = window.record(on: day, timeZone: zone) { visibleRecords[visible.id] = visible }
-                    }
-                }
-            }
-            XCTAssertEqual(visibleRecords, expectedRecords)
-            XCTAssertEqual(Set(visibleRecords.keys), Set(window.days.map(\.id)))
-            XCTAssertNil(window.lastObservedDay(in: TimeZone(identifier: "Pacific/Kiritimati")!))
         }
-        let reloaded = UsageHistoryStore(url: url, calendar: utcCalendar)
-        let window = try XCTUnwrap(reloaded.windows(for: "codex.primary").first)
-        XCTAssertEqual(Set(window.historyTimeZones().map(\.identifier)), ["GMT", "Australia/Sydney", "Pacific/Honolulu"])
-        XCTAssertEqual(window.completedDescription(resetEarly: false), "Week ended · last seen 35%")
-        XCTAssertEqual(window.lastObservedDay(in: TimeZone(identifier: "Australia/Sydney")!)?.endingPercent, 25)
+        let data = try Data(contentsOf: url)
+        for identifier in ["GMT", "Australia/Sydney", "Pacific/Honolulu", "Pacific/Kiritimati", "GMT"] {
+            var local = utcCalendar
+            local.timeZone = TimeZone(identifier: identifier)!
+            let actual = UsageHistoryStore(url: url, calendar: local).windows(for: "codex.primary")
+            let reference = UsageHistoryStore.inMemory(calendar: local)
+            for (_, timestamp, percent) in readings {
+                reference.record(snapshot(percent: percent, at: date(timestamp), reset: reset))
+            }
+            XCTAssertEqual(actual, reference.windows(for: "codex.primary"), identifier)
+            XCTAssertEqual(actual.first?.lastObservedDay?.endingPercent, 35)
+            XCTAssertTrue(actual.flatMap(\.days).allSatisfy { $0.timeZoneIdentifier == identifier })
+            XCTAssertEqual(try Data(contentsOf: url), data, "Viewing another zone must not rewrite history")
+        }
     }
 
     @MainActor

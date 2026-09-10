@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import DexBarCore
 
 enum LoadState: Equatable {
@@ -22,9 +23,12 @@ final class AppModel: ObservableObject {
 
     private let client: CodexAppServerClient
     private let projectionStore: ProjectionStore
-    private let usageHistoryStore: UsageHistoryStore
+    private let historyWorker: UsageHistoryWorker
     private var usesPreviewProjection = false
     private var previewProjection: Projection?
+    private var timeZoneObserver: AnyCancellable?
+    private var historyRevision = 0
+    private var historyGeneration = 0
 
     init(
         client: CodexAppServerClient = CodexAppServerClient(),
@@ -33,7 +37,13 @@ final class AppModel: ObservableObject {
     ) {
         self.client = client
         self.projectionStore = projectionStore ?? ProjectionStore()
-        self.usageHistoryStore = usageHistoryStore ?? UsageHistoryStore()
+        self.historyWorker = UsageHistoryWorker(store: usageHistoryStore)
+        timeZoneObserver = NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                NSTimeZone.resetSystemTimeZone()
+                self?.refreshHistoryPresentation()
+            }
     }
 
     var weeklyProjection: Projection? {
@@ -55,6 +65,19 @@ final class AppModel: ObservableObject {
         usageHistoryWindows.filter { $0.windowID == window.id }
     }
 
+    func refreshHistoryPresentation() {
+        guard !usesPreviewProjection, let snapshot else { return }
+        historyRevision += 1
+        let revision = historyRevision
+        let generation = historyGeneration
+        let calendar = Calendar.current
+        Task {
+            let windows = await historyWorker.presentation(for: snapshot.weekly.id, calendar: calendar, generation: generation)
+            guard historyRevision == revision else { return }
+            usageHistoryWindows = windows
+        }
+    }
+
     func refresh() async {
         guard !isRefreshing else { return }
         isRefreshing = true
@@ -68,13 +91,17 @@ final class AppModel: ObservableObject {
             let fresh = try await client.fetch()
             snapshot = fresh
             state = .ok
-            usageHistoryStore.backfill(
-                samples: projectionStore.recordedSamples(for: fresh.weekly.id),
-                for: fresh.weekly
-            )
-            usageHistoryStore.record(fresh)
+            historyRevision += 1
+            let revision = historyRevision
+            let generation = historyGeneration
+            let samples = projectionStore.recordedSamples(for: fresh.weekly.id)
             projectionStore.record(fresh)
-            usageHistoryWindows = usageHistoryStore.windows(for: fresh.weekly.id)
+            let result = await historyWorker.update(fresh,
+                projectionSamples: samples, calendar: Calendar.current, generation: generation)
+            if historyRevision == revision {
+                usageHistoryWindows = result.windows
+            }
+            if historyGeneration == generation, let error = result.persistenceError { state = .stale(error) }
             notifier.evaluate(snapshot: fresh, projection: weeklyProjection)
         } catch let error as CodexClientError {
             switch error {
@@ -94,11 +121,20 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func clearHistory() {
+    func clearHistory() async -> Bool {
         projectionStore.clear()
-        usageHistoryStore.clear()
+        historyRevision += 1
+        historyGeneration += 1
+        let generation = historyGeneration
+        let revision = historyRevision
         usageHistoryWindows = []
         onChange?()
+        let error = await historyWorker.clear(generation: generation)
+        if historyRevision == revision {
+            if let error { state = .stale(error) }
+            onChange?()
+        }
+        return error == nil
     }
 
     static func preview(

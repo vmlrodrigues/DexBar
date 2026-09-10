@@ -25,7 +25,6 @@ struct UsageHistoryView: View {
 
     @State private var selectedWindowID: String?
     @State private var dayPageOffset = 0
-    @State private var selectedTimeZoneIdentifier: String?
     @State private var isShowingInfo = false
     @State private var isShowingResetInfo = false
 
@@ -33,15 +32,13 @@ struct UsageHistoryView: View {
         windows: [UsageHistoryWindow],
         now: Date,
         dismiss: @escaping () -> Void,
-        initialWindowIndex: Int = 0,
-        initialTimeZoneIdentifier: String? = nil
+        initialWindowIndex: Int = 0
     ) {
         self.windows = windows
         self.now = now
         self.dismiss = dismiss
         _selectedWindowID = State(initialValue: windows.indices.contains(initialWindowIndex)
             ? windows[initialWindowIndex].id : windows.first?.id)
-        _selectedTimeZoneIdentifier = State(initialValue: initialTimeZoneIdentifier)
     }
 
     var body: some View {
@@ -70,7 +67,9 @@ struct UsageHistoryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: selectedWindow?.id) { _, _ in
             dayPageOffset = 0
-            selectedTimeZoneIdentifier = nil
+        }
+        .onChange(of: windows.first?.days.first?.timeZoneIdentifier) { _, _ in
+            dayPageOffset = 0
         }
         .onChange(of: windows.map(\.id)) { _, ids in
             // Insertions and pruning can move a week within the array. Only
@@ -132,16 +131,16 @@ struct UsageHistoryView: View {
             .focusable(false)
             .focusEffectDisabled()
             .popover(isPresented: $isShowingInfo, arrowEdge: .top) {
-                Text("History is calculated from usage readings stored on this Mac. Boundary arrows show when a window begins or ends partway through a calendar day. Symbols mark totals that are approximate, partial, or unavailable.")
+                Text("History is calculated from UTC usage readings stored on this Mac. Days follow your Mac’s current time zone, including when you travel. Boundary arrows mark partial days; symbols mark estimated or incomplete totals.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(width: 220, alignment: .leading)
                     .padding(12)
             }
-            if historyTimeZones(for: window).count > 1 {
-                timeZoneMenu(window)
-            }
+            Text(displayTimeZone(for: window).abbreviation(for: now) ?? "Local")
+                .font(.system(size: 9, weight: .medium))
+                .help("All days are shown in the Mac’s current time zone: \(displayTimeZone(for: window).identifier).")
             Spacer(minLength: 4)
             Button {
                 selectAdjacentWindow(offset: 1)
@@ -172,38 +171,6 @@ struct UsageHistoryView: View {
             .focusEffectDisabled()
         }
         .frame(height: 18)
-    }
-
-    private func timeZoneMenu(_ window: UsageHistoryWindow) -> some View {
-        let selected = displayTimeZone(for: window)
-        let labelDate = window.lastObservedDay(in: selected)?.lastObservedAt ?? now
-        return Menu {
-            ForEach(historyTimeZones(for: window), id: \.identifier) { zone in
-                Button {
-                    selectedTimeZoneIdentifier = zone.identifier
-                    dayPageOffset = 0
-                } label: {
-                    if zone.identifier == selected.identifier {
-                        Label(zone.identifier, systemImage: "checkmark")
-                    } else {
-                        Text(zone.identifier)
-                    }
-                }
-            }
-        } label: {
-            Text(selected.abbreviation(for: labelDate) ?? "Zone")
-                .font(.system(size: 9, weight: .medium))
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("Days recorded in \(selected.identifier). Choose another time zone to see its observations.")
-        .accessibilityLabel("History time zone: \(selected.identifier)")
-        .focusable(false)
-        .focusEffectDisabled()
-    }
-
-    private func historyTimeZones(for window: UsageHistoryWindow) -> [TimeZone] {
-        window.historyTimeZones(including: isCurrentWindow(window) ? .current : nil)
     }
 
     @ViewBuilder
@@ -383,16 +350,8 @@ struct UsageHistoryView: View {
     }
 
     private func displayTimeZone(for window: UsageHistoryWindow) -> TimeZone {
-        if let identifier = selectedTimeZoneIdentifier,
-           let selected = historyTimeZones(for: window).first(where: { $0.identifier == identifier }) {
-            return selected
-        }
-        guard !isCurrentWindow(window),
-              let identifier = window.lastObservedDay?.timeZoneIdentifier,
-              let timeZone = TimeZone(identifier: identifier) else {
-            return .current
-        }
-        return timeZone
+        // Every day in this derived window uses the same presentation calendar.
+        window.days.first.flatMap { TimeZone(identifier: $0.timeZoneIdentifier) } ?? .current
     }
 
     private func displayDay(in window: UsageHistoryWindow) -> DailyUsageRecord? {

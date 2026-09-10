@@ -45,6 +45,7 @@ struct SettingsView: View {
     @State private var launchError: String?
     @State private var notificationStatus: UNAuthorizationStatus?
     @State private var clearedHistory = false
+    @State private var isClearingHistory = false
 
     init(
         model: AppModel,
@@ -289,12 +290,15 @@ struct SettingsView: View {
                     title: "History on this Mac",
                     detail: "Stores projection samples for eight days and daily usage history for thirteen weeks; no prompts, code, or account identifiers."
                 ) {
-                    Button(clearedHistory ? "Cleared" : "Clear") {
-                        model.clearHistory()
-                        clearedHistory = true
+                    Button(isClearingHistory ? "Clearing…" : (clearedHistory ? "Cleared" : "Clear")) {
+                        isClearingHistory = true
+                        Task {
+                            clearedHistory = await model.clearHistory()
+                            isClearingHistory = false
+                        }
                     }
                     .controlSize(.small)
-                    .disabled(clearedHistory)
+                    .disabled(clearedHistory || isClearingHistory)
                 }
             }
         }
