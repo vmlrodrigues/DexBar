@@ -150,7 +150,8 @@ struct PopoverView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("Show daily usage history")
+                    .keyboardShortcut(.rightArrow, modifiers: [])
+                    .help("Show daily usage history (Right Arrow)")
                     .accessibilityLabel("Weekly usage. Show daily history.")
                     .mouseOnlyPopoverControl()
                     ForEach(snapshot.supplementary) { window in

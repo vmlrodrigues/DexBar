@@ -107,7 +107,8 @@ struct UsageHistoryView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Back to weekly usage")
+        .keyboardShortcut(.leftArrow, modifiers: [])
+        .help("Back to weekly usage (Left Arrow)")
         .accessibilityLabel("Back to weekly usage")
         .focusable(false)
         .focusEffectDisabled()
