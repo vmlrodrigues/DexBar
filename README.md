@@ -24,9 +24,9 @@ SwiftUI and AppKit, contains no web view, and stays out of the Dock. The normal 
 deliberately quiet: weekly usage remains primary, while shorter or model-specific limits
 surface only when Codex reports that they matter.
 
-Version **0.2.2** stores usage history in UTC and recalculates daily totals in your Mac’s
-current time zone, preserving history as you travel.
-See the [0.2.2 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.2.2).
+Version **0.2.3** fixes false weekly resets caused by small usage dips, repairs affected
+history automatically, and keeps the last-seen usage reading accurate.
+See the [0.2.3 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.2.3).
 
 <p align="center">
   <a href="Docs/DexBar-current.png"><img src="Docs/DexBar-current.png" width="600" alt="DexBar showing the minimal weekly usage view"></a>
@@ -198,8 +198,8 @@ development build: its menu-bar symbol is a hammer, automatic updates and login-
 are disabled, and the About pane identifies it as Development. The build script refuses to
 replace that exact development bundle while it is running.
 
-The number in parentheses after the version is the build number: **0.2.2 (21)** identifies the
-0.2.2 release. Builds derive this number from the Git commit count, so new commits increase it;
+The number in parentheses after the version is the build number: **0.2.3 (23)** identifies the
+0.2.3 release. Builds derive this number from the Git commit count, so new commits increase it;
 rebuilding the same commit keeps the same number. Sparkle uses it to compare updates.
 
 Regenerate every standard and Retina icon representation, plus `Resources/AppIcon.icns`, with:

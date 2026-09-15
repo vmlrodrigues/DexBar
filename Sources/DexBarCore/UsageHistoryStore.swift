@@ -64,6 +64,18 @@ public final class UsageHistoryStore {
                     throw CocoaError(.coderReadCorrupt)
                 }
                 document.readings.sort { $0.timestamp < $1.timestamp }
+                let repaired = Self.repairCorrectionSplits(document.readings)
+                if repaired != document.readings {
+                    // A failed backup must not turn a valid document into an empty one.
+                    do { try backup(data, kind: "v2") }
+                    catch {
+                        canPersist = false
+                        persistenceError = "Could not back up usage history before repair: \(error.localizedDescription)"
+                        return
+                    }
+                    document.readings = repaired
+                    persist()
+                }
                 // Recover summary evidence omitted by the first UTC development
                 // builds without replacing their newer readings.
                 if document.legacyIntervals == nil, let legacyURL,
@@ -190,7 +202,15 @@ public final class UsageHistoryStore {
         let previous = document.readings.last { $0.windowID == window.id }
         // A timestamp is immutable. Duplicate and out-of-order polls cannot change a cycle.
         guard previous == nil || timestamp > previous!.timestamp else { return false }
-        let sameCycle = previous.map { Self.isSameCycle(previous: $0, window: window, at: timestamp) } ?? false
+        let highWater = previous.map { previous in
+            document.readings.lazy.filter {
+                $0.windowID == previous.windowID && $0.cycleStartedAt == previous.cycleStartedAt
+            }.map(\.usedPercent).max() ?? previous.usedPercent
+        } ?? window.usedPercent
+        let sameCycle = previous.map {
+            Self.isSameCycle(previous: $0, percent: window.usedPercent, reset: window.resetsAt,
+                             duration: window.durationMinutes, at: timestamp, highWater: highWater)
+        } ?? false
         let start: Date
         let known: Bool
         if let previous, sameCycle {
@@ -213,15 +233,63 @@ public final class UsageHistoryStore {
         return true
     }
 
-    private static func isSameCycle(previous: UsageHistoryReading, window: UsageWindow, at timestamp: Date) -> Bool {
-        guard previous.durationMinutes == window.durationMinutes,
-              window.usedPercent >= previous.usedPercent else { return false }
-        if abs(previous.resetsAt.timeIntervalSince(window.resetsAt)) < 60 { return true }
-        let reportedStart = window.resetsAt.addingTimeInterval(-Double(window.durationMinutes) * 60)
+    private static func isSameCycle(previous: UsageHistoryReading, percent: Double, reset: Date,
+                                    duration: Int, at timestamp: Date, highWater: Double) -> Bool {
+        guard previous.durationMinutes == duration, highWater - percent <= 2 else { return false }
+        // Only a new downward movement needs the stricter correction check. A flat
+        // or recovering reading still follows normal schedule-revision rules, even
+        // if it has not yet reached the previous peak.
+        if percent < previous.usedPercent {
+            return isSmallCorrection(previous: previous, percent: percent,
+                                     reset: reset, at: timestamp, highWater: highWater)
+        }
+        if abs(previous.resetsAt.timeIntervalSince(reset)) < 60 { return true }
+        let reportedStart = reset.addingTimeInterval(-Double(duration) * 60)
         if previous.usedPercent > 0,
            reportedStart > previous.timestamp.addingTimeInterval(60),
            reportedStart <= timestamp.addingTimeInterval(60) { return false }
         return timestamp < previous.resetsAt
+    }
+
+    // Match the forecast's two-percentage-point tolerance, but require the same
+    // unexpired reset schedule. Use the cycle peak so repeated dips cannot ratchet
+    // the baseline down indefinitely. This is a heuristic, not an upstream guarantee.
+    private static func isSmallCorrection(previous: UsageHistoryReading, percent: Double,
+                                          reset: Date, at timestamp: Date, highWater: Double) -> Bool {
+        highWater - percent <= 2
+            && abs(previous.resetsAt.timeIntervalSince(reset)) < 60
+            && timestamp < previous.resetsAt
+    }
+
+    /// Repair only the uncertain boundaries that older builds invented at a small
+    /// dip. Keep all raw percentages, timestamps, and independently known resets.
+    private static func repairCorrectionSplits(_ readings: [UsageHistoryReading]) -> [UsageHistoryReading] {
+        var latest: [String: UsageHistoryReading] = [:]
+        var peaks: [CycleKey: Double] = [:]
+        var replacements: [CycleKey: UsageHistoryReading] = [:]
+        return readings.map { reading in
+            let key = CycleKey(windowID: reading.windowID, start: reading.cycleStartedAt)
+            if replacements[key] == nil, !reading.cycleStartKnown,
+               reading.cycleStartedAt == reading.timestamp,
+               let previous = latest[reading.windowID],
+               previous.cycleStartedAt != reading.cycleStartedAt,
+               previous.durationMinutes == reading.durationMinutes,
+               reading.usedPercent < peaks[CycleKey(windowID: previous.windowID, start: previous.cycleStartedAt), default: previous.usedPercent],
+               isSameCycle(previous: previous, percent: reading.usedPercent,
+                   reset: reading.resetsAt, duration: reading.durationMinutes, at: reading.timestamp,
+                   highWater: peaks[CycleKey(windowID: previous.windowID, start: previous.cycleStartedAt)] ?? previous.usedPercent) {
+                replacements[key] = previous
+            }
+            let replacement = replacements[key]
+            let repaired = UsageHistoryReading(windowID: reading.windowID, timestamp: reading.timestamp,
+                usedPercent: reading.usedPercent, resetsAt: reading.resetsAt, durationMinutes: reading.durationMinutes,
+                cycleStartedAt: replacement?.cycleStartedAt ?? reading.cycleStartedAt,
+                cycleStartKnown: replacement?.cycleStartKnown ?? reading.cycleStartKnown)
+            latest[reading.windowID] = repaired
+            let canonical = CycleKey(windowID: repaired.windowID, start: repaired.cycleStartedAt)
+            peaks[canonical] = max(peaks[canonical] ?? repaired.usedPercent, repaired.usedPercent)
+            return repaired
+        }
     }
 
     private static func isValid(_ reading: UsageHistoryReading) -> Bool {

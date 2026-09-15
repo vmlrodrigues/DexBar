@@ -28,6 +28,9 @@ public struct DailyUsageRecord: Codable, Equatable, Identifiable, Sendable {
     public let timeZoneIdentifier: String
     public var startingPercent: Double?
     public var endingPercent: Double?
+    /// Peak used only for daily attribution during a correction. endingPercent
+    /// remains the actual last reading; neither value replaces persisted samples.
+    public var attributedEndingPercent: Double?
     public var firstObservedAt: Date?
     public var lastObservedAt: Date?
     public var coverage: DailyUsageCoverage
@@ -47,7 +50,8 @@ public struct DailyUsageRecord: Codable, Equatable, Identifiable, Sendable {
         firstObservedAt: Date?,
         lastObservedAt: Date?,
         coverage: DailyUsageCoverage,
-        windowStartedAt: Date? = nil
+        windowStartedAt: Date? = nil,
+        attributedEndingPercent: Double? = nil
     ) {
         self.windowID = windowID
         self.windowResetsAt = windowResetsAt
@@ -56,6 +60,7 @@ public struct DailyUsageRecord: Codable, Equatable, Identifiable, Sendable {
         self.timeZoneIdentifier = timeZoneIdentifier
         self.startingPercent = startingPercent
         self.endingPercent = endingPercent
+        self.attributedEndingPercent = attributedEndingPercent
         self.firstObservedAt = firstObservedAt
         self.lastObservedAt = lastObservedAt
         self.coverage = coverage
@@ -75,7 +80,7 @@ public struct DailyUsageRecord: Codable, Equatable, Identifiable, Sendable {
 
     public var usedPercent: Double? {
         guard let startingPercent, let endingPercent else { return nil }
-        return max(0, endingPercent - startingPercent)
+        return max(0, (attributedEndingPercent ?? endingPercent) - startingPercent)
     }
 }
 
@@ -211,9 +216,18 @@ final class UsageHistoryAccumulator {
 
     func append(_ reading: UsageHistoryReading) {
         let previous = document.latestObservations.first { $0.windowID == reading.windowID }
+        // A tolerated correction must not erase a day's baseline or count the
+        // rebound again after midnight. Raw readings remain unchanged in the store;
+        // daily attribution uses the highest cumulative reading within this cycle.
+        let attributedPercent: Double
+        if let previous, previous.effectiveCycleStart == reading.cycleStartedAt {
+            attributedPercent = max(previous.usedPercent, reading.usedPercent)
+        } else {
+            attributedPercent = reading.usedPercent
+        }
         let observation = Observation(
             windowID: reading.windowID, timestamp: reading.timestamp,
-            usedPercent: reading.usedPercent, resetsAt: reading.resetsAt,
+            usedPercent: attributedPercent, resetsAt: reading.resetsAt,
             durationMinutes: reading.durationMinutes, timeZoneIdentifier: calendar.timeZone.identifier,
             cycleStartedAt: reading.cycleStartedAt
         )
@@ -229,6 +243,12 @@ final class UsageHistoryAccumulator {
                     calendar.isDate($0.timestamp, inSameDayAs: reading.timestamp)
                 } == true)
             startCycle(with: observation, resetKnownToday: resetKnownToday)
+        }
+        if let index = recordIndex(windowID: reading.windowID, cycleStartedAt: reading.cycleStartedAt,
+                                   dayStart: calendar.startOfDay(for: reading.timestamp),
+                                   timeZoneIdentifier: calendar.timeZone.identifier) {
+            document.days[index].endingPercent = reading.usedPercent
+            document.days[index].attributedEndingPercent = attributedPercent > reading.usedPercent ? attributedPercent : nil
         }
         document.latestObservations.removeAll { $0.windowID == reading.windowID }
         document.latestObservations.append(observation)

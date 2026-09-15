@@ -435,6 +435,9 @@ struct UsageHistoryView: View {
             parts.append("started at \(Int(start.rounded())) percent")
             parts.append("ended at \(Int(end.rounded())) percent")
         }
+        if let peak = record.attributedEndingPercent {
+            parts.append("daily total uses the previous peak of \(Int(peak.rounded())) percent so a rebound after a correction is not counted twice")
+        }
         switch record.coverage {
         case .observed: break
         case .estimated: parts.append("daily total estimated")

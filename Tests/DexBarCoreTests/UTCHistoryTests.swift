@@ -320,4 +320,174 @@ final class UTCHistoryTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 
+    func testSmallCorrectionPreservesCycleBaselineAcrossMidnightAndReload() throws {
+        let url = try temporaryURL()
+        let reset = date("2026-09-19T08:57:37Z")
+        let store = UsageHistoryStore(url: url, calendar: calendar("GMT"))
+        let readings = [("2026-09-12T08:57:37Z", 0.0), ("2026-09-14T23:56:00Z", 40.0),
+                        ("2026-09-15T00:01:00Z", 39.0), ("2026-09-15T00:06:00Z", 38.0),
+                        ("2026-09-15T00:11:00Z", 40.0), ("2026-09-15T01:00:00Z", 42.0)]
+        for (at, percent) in readings {
+            store.record(snapshot(percent, date(at), reset: reset))
+            XCTAssertEqual(store.windows(for: "codex.primary").count, 1)
+            XCTAssertEqual(store.windows(for: "codex.primary").first?.lastObservedDay?.endingPercent, percent)
+            XCTAssertEqual(store.windows(for: "codex.primary"), UsageHistoryStore(url: url, calendar: calendar("GMT")).windows(for: "codex.primary"))
+        }
+        let window = try XCTUnwrap(store.windows(for: "codex.primary").first)
+        XCTAssertEqual(window.startsAt, date("2026-09-12T08:57:37Z"))
+        XCTAssertEqual(window.days.last?.usedPercent, 2) // No charge for the rebound.
+        XCTAssertEqual(window.days.last?.startingPercent, 40)
+        for zone in ["GMT", "Europe/Stockholm", "Asia/Hong_Kong", "Australia/Sydney"] {
+            let original = store.windows(for: "codex.primary", calendar: calendar(zone))
+            XCTAssertEqual(original.count, 1)
+            XCTAssertEqual(original, UsageHistoryStore(url: url, calendar: calendar(zone)).windows(for: "codex.primary"))
+        }
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .secondsSince1970
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let saved = try decoder.decode([UsageHistoryReading].self, from: JSONSerialization.data(withJSONObject: object["readings"]!))
+        XCTAssertEqual(saved.map(\.usedPercent), readings.map { $0.1 })
+    }
+
+    func testCorrectionToleranceCannotHideAccumulatingDropsOrAChangedReset() throws {
+        let reset = date("2026-09-19T08:57:37Z")
+        let store = UsageHistoryStore.inMemory(calendar: calendar("GMT"))
+        for (index, percent) in [40.0, 39, 38, 37].enumerated() {
+            store.record(snapshot(percent, date("2026-09-15T09:00:00Z").addingTimeInterval(Double(index * 300)), reset: reset))
+        }
+        XCTAssertEqual(store.windows(for: "codex.primary").count, 2)
+        let changed = UsageHistoryStore.inMemory(calendar: calendar("GMT"))
+        changed.record(snapshot(40, date("2026-09-15T09:00:00Z"), reset: reset))
+        changed.record(snapshot(39, date("2026-09-15T10:00:00Z"), reset: date("2026-09-22T09:30:00Z")))
+        XCTAssertEqual(changed.windows(for: "codex.primary").count, 2)
+        XCTAssertEqual(changed.windows(for: "codex.primary").first?.startsAt, date("2026-09-15T09:30:00Z"))
+    }
+
+    func testRepairsPersistedSmallDipSplitWithExactBackupAndNoRawDataChanges() throws {
+        let url = try temporaryURL()
+        let start = date("2026-09-12T08:54:24Z")
+        let reset = date("2026-09-19T08:57:37Z")
+        let split = date("2026-09-15T09:13:53Z")
+        let records = [
+            UsageHistoryReading(windowID: "codex.primary", timestamp: start, usedPercent: 0, resetsAt: reset,
+                durationMinutes: 10080, cycleStartedAt: start, cycleStartKnown: true),
+            UsageHistoryReading(windowID: "codex.primary", timestamp: date("2026-09-15T09:08:50Z"), usedPercent: 40, resetsAt: reset,
+                durationMinutes: 10080, cycleStartedAt: start, cycleStartKnown: true),
+            UsageHistoryReading(windowID: "codex.primary", timestamp: split, usedPercent: 39, resetsAt: reset.addingTimeInterval(-1),
+                durationMinutes: 10080, cycleStartedAt: split, cycleStartKnown: false),
+            UsageHistoryReading(windowID: "codex.primary", timestamp: date("2026-09-15T10:39:23Z"), usedPercent: 42, resetsAt: reset,
+                durationMinutes: 10080, cycleStartedAt: split, cycleStartKnown: false),
+        ]
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .secondsSince1970
+        let array = try JSONSerialization.jsonObject(with: encoder.encode(records))
+        let original = try JSONSerialization.data(withJSONObject: ["schemaVersion": 2, "timestampEncoding": "unixSecondsUTC", "legacyIntervals": [], "readings": array])
+        try original.write(to: url)
+        let store = UsageHistoryStore(url: url, calendar: calendar("Europe/Stockholm"))
+        XCTAssertNil(store.persistenceError)
+        XCTAssertEqual(store.windows(for: "codex.primary").count, 1)
+        XCTAssertEqual(store.windows(for: "codex.primary").first?.startsAt, start)
+        let backup = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: url.deletingLastPathComponent(), includingPropertiesForKeys: nil).first { $0.lastPathComponent.contains("v2-backup") })
+        XCTAssertEqual(try Data(contentsOf: backup), original)
+        let repairedBytes = try Data(contentsOf: url)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: repairedBytes) as? [String: Any])
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .secondsSince1970
+        let repaired = try decoder.decode([UsageHistoryReading].self, from: JSONSerialization.data(withJSONObject: object["readings"]!))
+        XCTAssertEqual(repaired.map(\.usedPercent), records.map(\.usedPercent))
+        XCTAssertEqual(repaired.map(\.timestamp), records.map(\.timestamp))
+        XCTAssertEqual(repaired.map(\.resetsAt), records.map(\.resetsAt))
+        XCTAssertTrue(repaired.allSatisfy { $0.cycleStartedAt == start && $0.cycleStartKnown })
+        _ = UsageHistoryStore(url: url)
+        XCTAssertEqual(try Data(contentsOf: url), repairedBytes)
+        store.clear()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backup.path))
+    }
+
+    func testRepairLeavesLargeDropsAndIndependentlyKnownResetsAlone() throws {
+        let reset = date("2026-09-19T08:57:37Z")
+        let start = date("2026-09-12T08:57:37Z")
+        let at = date("2026-09-15T09:13:53Z")
+        for (percent, known, schedule) in [(15.0, false, reset), (39.0, true, reset),
+                                            (39.0, false, reset.addingTimeInterval(3600))] {
+            let url = try temporaryURL()
+            let records = [
+                UsageHistoryReading(windowID: "codex.primary", timestamp: at.addingTimeInterval(-300), usedPercent: 40,
+                    resetsAt: reset, durationMinutes: 10080, cycleStartedAt: start, cycleStartKnown: true),
+                UsageHistoryReading(windowID: "codex.primary", timestamp: at, usedPercent: percent,
+                    resetsAt: schedule, durationMinutes: 10080, cycleStartedAt: at, cycleStartKnown: known),
+            ]
+            let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .secondsSince1970
+            let data = try JSONSerialization.data(withJSONObject: ["schemaVersion": 2, "timestampEncoding": "unixSecondsUTC",
+                "legacyIntervals": [], "readings": JSONSerialization.jsonObject(with: encoder.encode(records))])
+            try data.write(to: url)
+            XCTAssertEqual(UsageHistoryStore(url: url).windows(for: "codex.primary").count, 2)
+            XCTAssertEqual(try Data(contentsOf: url), data)
+        }
+    }
+
+    func testScheduleRevisionDuringCorrectionKeepsTheWeek() throws {
+        let reset = date("2026-09-19T08:57:37Z")
+        for nextPercent in [39.0, 39.5, 40.0] {
+            let url = try temporaryURL()
+            let store = UsageHistoryStore(url: url, calendar: calendar("GMT"))
+            store.record(snapshot(40, date("2026-09-15T09:00:00Z"), reset: reset))
+            store.record(snapshot(39, date("2026-09-15T09:05:00Z"), reset: reset))
+            store.record(snapshot(nextPercent, date("2026-09-15T09:10:00Z"), reset: reset.addingTimeInterval(3600)))
+            let windows = store.windows(for: "codex.primary")
+            XCTAssertEqual(windows.count, 1)
+            XCTAssertEqual(windows.first?.startsAt, date("2026-09-12T08:57:37Z"))
+            XCTAssertEqual(windows.first?.resetsAt, reset.addingTimeInterval(3600))
+            XCTAssertEqual(windows, UsageHistoryStore(url: url, calendar: calendar("GMT")).windows(for: "codex.primary"))
+            // An actual new reported start must still separate an allowance while below the peak.
+            store.record(snapshot(nextPercent, date("2026-09-15T10:00:00Z"), reset: date("2026-09-22T09:30:00Z")))
+            XCTAssertEqual(store.windows(for: "codex.primary").count, 2)
+        }
+    }
+
+    func testActualLastReadingSurvivesCorrectionAndCompletion() throws {
+        let url = try temporaryURL()
+        let reset = date("2026-09-19T08:57:37Z")
+        let store = UsageHistoryStore(url: url, calendar: calendar("GMT"))
+        store.record(snapshot(0, date("2026-09-12T08:57:37Z"), reset: reset))
+        store.record(snapshot(40, date("2026-09-12T09:00:00Z"), reset: reset))
+        store.record(snapshot(39, date("2026-09-12T09:05:00Z"), reset: reset))
+        var window = try XCTUnwrap(store.windows(for: "codex.primary").first)
+        XCTAssertEqual(window.lastObservedDay?.endingPercent, 39)
+        XCTAssertEqual(window.lastObservedDay?.attributedEndingPercent, 40)
+        XCTAssertEqual(window.lastObservedDay?.usedPercent, 40)
+        XCTAssertEqual(window.lastObservedDay?.lastObservedAt, date("2026-09-12T09:05:00Z"))
+        XCTAssertEqual(window.completedDescription(resetEarly: false), "Week ended · last seen 39%")
+        XCTAssertEqual(UsageHistoryStore(url: url, calendar: calendar("GMT")).windows(for: "codex.primary").first, window)
+        store.record(snapshot(0, date("2026-09-12T10:05:00Z"), reset: date("2026-09-19T10:00:00Z")))
+        window = try XCTUnwrap(store.windows(for: "codex.primary").last)
+        XCTAssertEqual(window.completedDescription(resetEarly: true), "Week reset early · last seen 39%")
+    }
+
+    func testRepairHandlesFlatOrRecoveringSplitAfterDipAndScheduleRevision() throws {
+        for latestPercent in [39.0, 39.5] {
+            let url = try temporaryURL()
+            let reset = date("2026-09-19T08:57:37Z")
+            let start = date("2026-09-12T08:57:37Z")
+            let split = date("2026-09-15T09:10:00Z")
+            let readings = [
+                UsageHistoryReading(windowID: "codex.primary", timestamp: date("2026-09-15T09:00:00Z"), usedPercent: 40,
+                    resetsAt: reset, durationMinutes: 10080, cycleStartedAt: start, cycleStartKnown: true),
+                UsageHistoryReading(windowID: "codex.primary", timestamp: date("2026-09-15T09:05:00Z"), usedPercent: 39,
+                    resetsAt: reset, durationMinutes: 10080, cycleStartedAt: start, cycleStartKnown: true),
+                UsageHistoryReading(windowID: "codex.primary", timestamp: split, usedPercent: latestPercent,
+                    resetsAt: reset.addingTimeInterval(3600), durationMinutes: 10080, cycleStartedAt: split, cycleStartKnown: false),
+            ]
+            let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .secondsSince1970
+            let bytes = try JSONSerialization.data(withJSONObject: ["schemaVersion": 2, "timestampEncoding": "unixSecondsUTC",
+                "legacyIntervals": [], "readings": JSONSerialization.jsonObject(with: encoder.encode(readings))])
+            try bytes.write(to: url)
+            let windows = UsageHistoryStore(url: url, calendar: calendar("GMT")).windows(for: "codex.primary")
+            XCTAssertEqual(windows.count, 1)
+            XCTAssertEqual(windows.first?.startsAt, start)
+            XCTAssertEqual(windows.first?.lastObservedDay?.endingPercent, latestPercent)
+            let repaired = try Data(contentsOf: url)
+            XCTAssertNotEqual(repaired, bytes)
+            XCTAssertEqual(UsageHistoryStore(url: url, calendar: calendar("GMT")).windows(for: "codex.primary"), windows)
+            XCTAssertEqual(try Data(contentsOf: url), repaired)
+        }
+    }
+
 }
