@@ -24,9 +24,9 @@ SwiftUI and AppKit, contains no web view, and stays out of the Dock. The normal 
 deliberately quiet: weekly usage remains primary, while shorter or model-specific limits
 surface only when Codex reports that they matter.
 
-Version **0.2.4** adds a spending-based forecast for usage credits and displays balances
-with two decimal places.
-See the [0.2.4 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.2.4).
+Version **0.2.5** shows a preliminary credit forecast after one hour of spending history,
+with collection progress displayed in minutes.
+See the [0.2.5 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.2.5).
 
 <p align="center">
   <a href="Docs/DexBar-current.png"><img src="Docs/DexBar-current.png" width="600" alt="DexBar showing the minimal weekly usage view"></a>
@@ -133,10 +133,10 @@ and red appear only when the uncertainty range says the allowance may or is like
 
 The remaining credit balance uses two decimal places. A separate estimate beneath it shows
 how long the balance may last at the recorded spending pace. It starts collecting evidence
-when the balance begins falling, requires six hours and decreases in at least two different
-hour buckets, and is labelled **Preliminary** until 24 hours. The estimate blends the overall
-pace with an hourly-sampled, recency-weighted trend from the last day. It does not convert
-subscription percentages into credits.
+when the balance begins falling and shows an estimate after one hour, labelled **Preliminary**
+until 24 hours. It updates with each reading, initially using the overall spending pace,
+then blending in an hourly-sampled, recency-weighted trend once at least six hours of recent
+history are available. It does not convert subscription percentages into credits.
 
 Top-ups/refunds, account or plan changes, unavailable balances, backward clock adjustments,
 and polling gaps over a day restart the estimate. If the service omits account identity,
@@ -219,8 +219,8 @@ development build: its menu-bar symbol is a hammer, automatic updates and login-
 are disabled, and the About pane identifies it as Development. The build script refuses to
 replace that exact development bundle while it is running.
 
-The number in parentheses after the version is the build number: **0.2.4 (25)** identifies the
-0.2.4 release. Builds derive this number from the Git commit count, so new commits increase it;
+The number in parentheses after the version is the build number: **0.2.5 (27)** identifies the
+0.2.5 release. Builds derive this number from the Git commit count, so new commits increase it;
 rebuilding the same commit keeps the same number. Sparkle uses it to compare updates.
 
 Regenerate every standard and Retina icon representation, plus `Resources/AppIcon.icns`, with:

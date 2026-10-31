@@ -42,21 +42,52 @@ final class CreditHistoryTests: XCTestCase {
     }
 
     func testSteadySpendingForecastAndMaturity() throws {
-        let early = (0...6).map { sample(Double($0), Decimal(1000 - $0 * 10)) }
+        let early = [sample(0, 1000), sample(1, 990)]
         let p = try estimate(CreditForecastCalculator.calculate(samples: early))
         XCTAssertEqual(p.creditsPerDay, 240, accuracy: 0.001)
-        XCTAssertEqual(p.secondsRemaining / 3600, 94, accuracy: 0.001)
+        XCTAssertEqual(p.secondsRemaining / 3600, 99, accuracy: 0.001)
         XCTAssertTrue(p.preliminary)
         let mature = (0...24).map { sample(Double($0), Decimal(1000 - $0 * 10)) }
         XCTAssertFalse(try estimate(CreditForecastCalculator.calculate(samples: mature)).preliminary)
     }
 
-    func testRequiresTimeAndRepeatedSpendingNotJustOneLargeDrop() {
+    func testRequiresOneHourAndObservedSpending() throws {
         XCTAssertEqual(CreditForecastCalculator.calculate(samples: [sample(0, 1000), sample(24, 1000)]), .waitingForSpending)
-        XCTAssertEqual(CreditForecastCalculator.calculate(samples: [sample(0, 1000), sample(1, 900), sample(6, 900)]), .collecting(hours: 6))
-        XCTAssertEqual(CreditForecastCalculator.calculate(samples: [sample(0, 1000), sample(1, 990), sample(2, 980)]), .collecting(hours: 2))
+        XCTAssertEqual(CreditForecastCalculator.calculate(samples: [sample(0, 1000), sample(0.5, 900)]), .collecting(minutes: 30))
+        XCTAssertEqual(CreditForecastCalculator.calculate(samples: [sample(0, 1000), sample(3599.0 / 3600, 900)]), .collecting(minutes: 59))
+        let p = try estimate(CreditForecastCalculator.calculate(samples: [sample(0, 1000), sample(1, 900)]))
+        XCTAssertTrue(p.preliminary)
+        XCTAssertEqual(p.secondsRemaining / 3600, 9, accuracy: 0.001)
+        // Eligibility is elapsed time, independent of UTC hour bucket boundaries.
+        let shifted = try estimate(CreditForecastCalculator.calculate(samples: [sample(0.25, 1000), sample(1.25, 900)]))
+        XCTAssertEqual(shifted.creditsPerDay, p.creditsPerDay, accuracy: 0.001)
         // A week on the included allowance cannot mature a newly-started credit rate.
-        XCTAssertEqual(CreditForecastCalculator.calculate(samples: [sample(0, 1000), sample(100, 1000), sample(101, 990)]), .collecting(hours: 1))
+        XCTAssertEqual(CreditForecastCalculator.calculate(samples: [sample(0, 1000), sample(100, 1000), sample(100.25, 990)]), .collecting(minutes: 15))
+    }
+
+    func testPreliminaryEstimateRefinesOnNextReadingAndStopsAfterIdleDay() throws {
+        let firstHour = [sample(0, 1000), sample(0.5, 995), sample(1, 990)]
+        let early = try estimate(CreditForecastCalculator.calculate(samples: firstHour))
+        let next = try estimate(CreditForecastCalculator.calculate(samples: firstHour + [sample(2, 960)]))
+        XCTAssertTrue(early.preliminary)
+        XCTAssertTrue(next.preliminary)
+        XCTAssertEqual(early.creditsPerDay, 240, accuracy: 0.001)
+        XCTAssertEqual(next.creditsPerDay, 480, accuracy: 0.001)
+        XCTAssertLessThan(next.secondsRemaining, early.secondsRemaining)
+        XCTAssertEqual(CreditForecastCalculator.calculate(samples: [sample(0, 1000), sample(1, 900), sample(25, 900)]), .waitingForSpending)
+    }
+
+    func testFirstHourHistorySurvivesRelaunch() throws {
+        let path = try url()
+        var store = CreditHistoryStore(url: path)
+        store.record(snapshot(0, "1000"))
+        store.record(snapshot(0.5, "995"))
+        XCTAssertEqual(store.forecast, .collecting(minutes: 30))
+        store = CreditHistoryStore(url: path)
+        store.record(snapshot(1, "990"))
+        let p = try estimate(store.forecast)
+        XCTAssertTrue(p.preliminary)
+        XCTAssertEqual(p.secondsRemaining / 3600, 99, accuracy: 0.001)
     }
 
     func testRecentAccelerationAndIdlePeriods() throws {

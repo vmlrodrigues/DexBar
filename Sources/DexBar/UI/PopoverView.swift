@@ -184,7 +184,7 @@ struct PopoverView: View {
                                 .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
-                                .help("Estimated from recorded balance decreases, blending overall spending with the last 24 hours. Preliminary until 24 hours of spending history. Assumes similar usage and no credit expiry. Top-ups, account or plan changes, and gaps over a day restart the estimate.")
+                                .help("Starts after one hour of recorded spending and updates with each reading, blending overall spending with the last 24 hours as history grows. Preliminary until 24 hours of spending history. Assumes similar usage and no credit expiry. Top-ups, account or plan changes, and gaps over a day restart the estimate.")
                         }
                     }
                     .font(.system(size: 11))
@@ -280,10 +280,9 @@ struct PopoverView: View {
         switch model.creditForecast {
         case .unavailable: return nil
         case .waitingForSpending: return stale ? "Last reading · no recent credit spending" : "Waiting for credit spending"
-        case .collecting(let hours):
+        case .collecting(let minutes):
             return stale ? "Last reading · collecting spending history"
-                : (hours < 6 ? "Collecting spending history · \(hours) of 6 hours"
-                             : "Waiting for more credit spending")
+                : "Collecting spending history · \(minutes) of 60 min"
         case .depleted: return stale ? "Last reading · credits depleted" : "Credits depleted"
         case .estimate(let estimate):
             let duration = estimate.secondsRemaining >= 365 * 86400 ? "Over a year"

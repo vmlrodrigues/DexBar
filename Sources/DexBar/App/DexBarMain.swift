@@ -248,10 +248,10 @@ enum DexBarMain {
         if state == "credits-empty" { return .depleted }
         if state == "credits-unlimited" { return .unavailable }
         guard let balance = CreditBalance.parse(snapshot.credits?.balance) else { return .unavailable }
-        let hours = state == "credits-new" ? 2 : (state == "credits-preliminary" ? 6 : 24)
-        let samples = (0...hours).map { hour in
-            CreditSample(timestamp: snapshot.fetchedAt.addingTimeInterval(Double(hour - hours) * 3600),
-                         balance: balance + Decimal((hours - hour) * 100))
+        let steps = state == "credits-new" ? 1 : (state == "credits-preliminary" ? 2 : 48)
+        let samples = (0...steps).map { step in
+            CreditSample(timestamp: snapshot.fetchedAt.addingTimeInterval(Double(step - steps) * 1800),
+                         balance: balance + Decimal((steps - step) * 50))
         }
         return CreditForecastCalculator.calculate(samples: samples)
     }

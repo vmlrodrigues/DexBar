@@ -34,7 +34,7 @@ public struct CreditSample: Codable, Equatable, Sendable {
 public enum CreditForecast: Equatable, Sendable {
     case unavailable
     case waitingForSpending
-    case collecting(hours: Int)
+    case collecting(minutes: Int)
     case depleted
     case estimate(CreditEstimate)
 }
@@ -69,11 +69,11 @@ public enum CreditForecastCalculator {
         let observations = Array(segment[(firstDrop - 1)...])
         let first = observations[0]
         let span = last.timestamp.timeIntervalSince(first.timestamp)
-        let dropHours = Set(observations.indices.dropFirst().filter {
-            observations[$0].balance < observations[$0 - 1].balance
-        }.map { Int(floor(observations[$0].timestamp.timeIntervalSince1970 / 3600)) })
-        guard span >= 6 * 3600, dropHours.count >= 2 else {
-            return .collecting(hours: min(6, max(0, Int(span / 3600))))
+        // A measured decrease over an hour is enough for a preliminary estimate.
+        // Do not require drops in separate UTC hour buckets: that would make the
+        // first estimate depend on the wall-clock hour when polling began.
+        guard span >= 3600 else {
+            return .collecting(minutes: max(0, Int(span / 60)))
         }
         // Stop presenting a depletion countdown after a full day of no observed
         // spending. A failed refresh never calls this calculator with a later clock.
