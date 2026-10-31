@@ -24,9 +24,9 @@ SwiftUI and AppKit, contains no web view, and stays out of the Dock. The normal 
 deliberately quiet: weekly usage remains primary, while shorter or model-specific limits
 surface only when Codex reports that they matter.
 
-Version **0.2.3** fixes false weekly resets caused by small usage dips, repairs affected
-history automatically, and keeps the last-seen usage reading accurate.
-See the [0.2.3 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.2.3).
+Version **0.2.4** adds a spending-based forecast for usage credits and displays balances
+with two decimal places.
+See the [0.2.4 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.2.4).
 
 <p align="center">
   <a href="Docs/DexBar-current.png"><img src="Docs/DexBar-current.png" width="600" alt="DexBar showing the minimal weekly usage view"></a>
@@ -129,6 +129,24 @@ and red appear only when the uncertainty range says the allowance may or is like
 
 <p align="center"><sub>A weekly projection crossing the limit, using sample data.</sub></p>
 
+## Usage credits
+
+The remaining credit balance uses two decimal places. A separate estimate beneath it shows
+how long the balance may last at the recorded spending pace. It starts collecting evidence
+when the balance begins falling, requires six hours and decreases in at least two different
+hour buckets, and is labelled **Preliminary** until 24 hours. The estimate blends the overall
+pace with an hourly-sampled, recency-weighted trend from the last day. It does not convert
+subscription percentages into credits.
+
+Top-ups/refunds, account or plan changes, unavailable balances, backward clock adjustments,
+and polling gaps over a day restart the estimate. If the service omits account identity,
+the balance still displays but forecasting pauses and its history is discarded, preventing
+different accounts' balances from being combined. After a full day without spending, it
+waits for spending to resume.
+Failed refreshes retain a clearly labelled last estimate rather than counting down from stale
+data. Balance decreases may include expirations or adjustments: the service does not provide
+a spending ledger, so the forecast assumes similar usage and no credit expiry.
+
 ## Other features
 
 - Adaptive refresh: every minute during recent Codex activity or at 80% usage and above,
@@ -136,7 +154,7 @@ and red appear only when the uncertainty range says the allowance may or is like
 - Immediate refresh when the popover opens and after the Mac wakes.
 - Optional notifications at 80%, 95%, and when the weekly projection crosses the limit.
 - An optional global shortcut to show or hide the popover from any app.
-- Launch at login, manual refresh, clearing projection and daily history, and a manual update check.
+- Launch at login, manual refresh, clearing projection, credit, and daily history, and a manual update check.
 - Daily Sparkle update checks that always ask before installing.
 
 The global shortcut uses Carbon hotkey registration. It receives only the chosen combination,
@@ -155,6 +173,9 @@ for eight days in `~/Library/Application Support/DexBar/projection-history.json`
 are retained for thirteen weeks in `~/Library/Application Support/DexBar/usage-readings.json`
 (with one preceding baseline for retained cycles). Local days and coverage markers are derived
 for display, rather than saved separately for each time zone.
+Credit balances and UTC observation times are retained for eight days in `credit-history.json`,
+with a SHA-256 account-and-plan hash to separate forecasts without storing the raw account ID.
+Credit history is recorded only while the service provides an account identity.
 
 The former `usage-history.json` is migrated automatically, with an untouched backup in the same
 directory. The new filename protects UTC history if an older DexBar is launched accidentally.
@@ -163,9 +184,9 @@ Known old daily totals are also retained as separate summary evidence with UTC i
 so missing raw samples do not erase those totals in their original calendar days. These summaries
 are never converted into invented timestamped readings. Migration cannot recover the precise
 timing of every past increase, so some older totals may be estimated or incomplete when viewed
-in a different time zone. Both histories and automatic
+in a different time zone. All three histories and automatic
 migration backups can be cleared from **Settings → Data & Privacy**. These files contain no
-prompts, source code, account identifiers, or service-mode history.
+prompts, source code, raw account identifiers, or service-mode history.
 
 DexBar watches filesystem-change notifications beneath `~/.codex/sessions` solely to choose a
 fresher polling interval after Codex activity. It does not open or read the session contents.
@@ -198,8 +219,8 @@ development build: its menu-bar symbol is a hammer, automatic updates and login-
 are disabled, and the About pane identifies it as Development. The build script refuses to
 replace that exact development bundle while it is running.
 
-The number in parentheses after the version is the build number: **0.2.3 (23)** identifies the
-0.2.3 release. Builds derive this number from the Git commit count, so new commits increase it;
+The number in parentheses after the version is the build number: **0.2.4 (25)** identifies the
+0.2.4 release. Builds derive this number from the Git commit count, so new commits increase it;
 rebuilding the same commit keeps the same number. Sparkle uses it to compare updates.
 
 Regenerate every standard and Retina icon representation, plus `Resources/AppIcon.icns`, with:

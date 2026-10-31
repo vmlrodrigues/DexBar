@@ -288,7 +288,7 @@ struct SettingsView: View {
                 Divider()
                 settingsRow(
                     title: "History on this Mac",
-                    detail: "Stores projection samples for eight days and daily usage history for thirteen weeks; no prompts, code, or account identifiers."
+                    detail: "Stores projection and credit samples for eight days and daily usage history for thirteen weeks. Credit history uses an account-and-plan hash; no prompts, code, or raw account identifiers."
                 ) {
                     Button(isClearingHistory ? "Clearing…" : (clearedHistory ? "Cleared" : "Clear")) {
                         isClearingHistory = true

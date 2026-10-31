@@ -6,14 +6,32 @@ public actor UsageHistoryWorker {
     public struct Result: Sendable {
         public let windows: [UsageHistoryWindow]
         public let persistenceError: String?
+        public let creditForecast: CreditForecast
     }
 
     private var store: UsageHistoryStore?
+    private var creditStore: CreditHistoryStore?
     private var generation = 0
 
     /// An injected store transfers ownership to this worker; do not access it again
     /// from another executor. The default store is opened lazily on this actor.
-    public init(store: UsageHistoryStore? = nil) { self.store = store }
+    public init(store: UsageHistoryStore? = nil, creditStore: CreditHistoryStore? = nil) {
+        self.store = store
+        // Injected/test history stores must never open the user's credit file.
+        self.creditStore = creditStore ?? (store == nil ? nil : CreditHistoryStore(url: nil))
+    }
+
+    private func resolvedCredits() -> CreditHistoryStore {
+        if let creditStore { return creditStore }
+        let created = CreditHistoryStore.persistent()
+        creditStore = created
+        return created
+    }
+
+    private var persistenceError: String? {
+        [resolvedStore().persistenceError, resolvedCredits().persistenceError]
+            .compactMap { $0 }.first
+    }
 
     private func resolvedStore() -> UsageHistoryStore {
         if let store { return store }
@@ -29,16 +47,18 @@ public actor UsageHistoryWorker {
         // deleted history, and newer updates must clear before starting fresh.
         if let requestedGeneration, requestedGeneration > generation {
             store.clear()
+            resolvedCredits().clear()
             generation = requestedGeneration
         }
         if let requestedGeneration, requestedGeneration < generation {
             return Result(windows: store.windows(for: snapshot.weekly.id, calendar: calendar),
-                          persistenceError: store.persistenceError)
+                          persistenceError: persistenceError, creditForecast: resolvedCredits().forecast)
         }
         store.backfill(samples: projectionSamples, for: snapshot.weekly)
         store.record(snapshot)
+        resolvedCredits().record(snapshot)
         return Result(windows: store.windows(for: snapshot.weekly.id, calendar: calendar),
-                      persistenceError: store.persistenceError)
+                      persistenceError: persistenceError, creditForecast: resolvedCredits().forecast)
     }
 
     public func presentation(for windowID: String, calendar: Calendar,
@@ -46,6 +66,7 @@ public actor UsageHistoryWorker {
         let store = resolvedStore()
         if let requestedGeneration, requestedGeneration > generation {
             store.clear()
+            resolvedCredits().clear()
             generation = requestedGeneration
         }
         return store.windows(for: windowID, calendar: calendar)
@@ -53,9 +74,10 @@ public actor UsageHistoryWorker {
 
     public func clear(generation requestedGeneration: Int? = nil) -> String? {
         let store = resolvedStore()
-        if let requestedGeneration, requestedGeneration <= generation { return store.persistenceError }
+        if let requestedGeneration, requestedGeneration <= generation { return persistenceError }
         generation = requestedGeneration ?? (generation + 1)
         store.clear()
-        return store.persistenceError
+        resolvedCredits().clear()
+        return persistenceError
     }
 }

@@ -14,6 +14,7 @@ enum LoadState: Equatable {
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot?
+    @Published private(set) var creditForecast: CreditForecast = .unavailable
     @Published private(set) var usageHistoryWindows: [UsageHistoryWindow] = []
     @Published private(set) var state: LoadState = .loading
     @Published private(set) var isRefreshing = false
@@ -90,6 +91,7 @@ final class AppModel: ObservableObject {
         do {
             let fresh = try await client.fetch()
             snapshot = fresh
+            creditForecast = .unavailable
             state = .ok
             historyRevision += 1
             let revision = historyRevision
@@ -101,7 +103,10 @@ final class AppModel: ObservableObject {
             if historyRevision == revision {
                 usageHistoryWindows = result.windows
             }
-            if historyGeneration == generation, let error = result.persistenceError { state = .stale(error) }
+            if historyGeneration == generation {
+                creditForecast = result.creditForecast
+                if let error = result.persistenceError { state = .stale(error) }
+            }
             notifier.evaluate(snapshot: fresh, projection: weeklyProjection)
         } catch let error as CodexClientError {
             switch error {
@@ -128,6 +133,7 @@ final class AppModel: ObservableObject {
         let generation = historyGeneration
         let revision = historyRevision
         usageHistoryWindows = []
+        creditForecast = .unavailable
         onChange?()
         let error = await historyWorker.clear(generation: generation)
         if historyRevision == revision {
@@ -141,7 +147,8 @@ final class AppModel: ObservableObject {
         snapshot: UsageSnapshot?,
         state: LoadState = .ok,
         projection: Projection? = nil,
-        usageHistoryWindows: [UsageHistoryWindow] = []
+        usageHistoryWindows: [UsageHistoryWindow] = [],
+        creditForecast: CreditForecast = .unavailable
     ) -> AppModel {
         let model = AppModel(
             projectionStore: .inMemory(),
@@ -151,6 +158,7 @@ final class AppModel: ObservableObject {
         model.state = state
         model.usesPreviewProjection = true
         model.previewProjection = projection
+        model.creditForecast = creditForecast
         model.usageHistoryWindows = usageHistoryWindows
         return model
     }

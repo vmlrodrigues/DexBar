@@ -72,8 +72,14 @@ public struct UsageCredits: Equatable, Codable, Sendable {
         self.balance = balance
     }
 
+    public func displayBalance(locale: Locale = .current) -> String {
+        if unlimited { return "Unlimited" }
+        guard let amount = CreditBalance.parse(balance) else { return hasCredits ? "Available" : "Unavailable" }
+        return CreditBalance.formatted(amount, locale: locale)
+    }
+
     public var isWorthShowing: Bool {
-        unlimited || hasCredits || (balance.map { $0 != "0" && $0 != "0.0" } ?? false)
+        unlimited || hasCredits || (CreditBalance.parse(balance).map { $0 > 0 } ?? false)
     }
 }
 
@@ -108,6 +114,7 @@ public struct UsageSnapshot: Equatable, Sendable {
     public let credits: UsageCredits?
     public let resetCreditsAvailable: Int
     public let fetchedAt: Date
+    public let accountID: String?
 
     public init(
         weekly: UsageWindow,
@@ -116,7 +123,8 @@ public struct UsageSnapshot: Equatable, Sendable {
         serviceTier: UsageServiceTier? = nil,
         credits: UsageCredits?,
         resetCreditsAvailable: Int,
-        fetchedAt: Date
+        fetchedAt: Date,
+        accountID: String? = nil
     ) {
         self.weekly = weekly
         self.supplementary = supplementary
@@ -125,6 +133,7 @@ public struct UsageSnapshot: Equatable, Sendable {
         self.credits = credits
         self.resetCreditsAvailable = resetCreditsAvailable
         self.fetchedAt = fetchedAt
+        self.accountID = accountID
     }
 
     /// The menu bar stays weekly unless a live supplementary window is genuinely more
@@ -170,6 +179,7 @@ struct AppServerResetCredits: Decodable {
 }
 
 struct AppServerRateLimitsPayload: Decodable {
+    let accountId: String?
     let rateLimits: AppServerRateLimitBucket?
     let rateLimitsByLimitId: [String: AppServerRateLimitBucket]?
     let rateLimitResetCredits: AppServerResetCredits?
@@ -250,7 +260,8 @@ enum UsageMapper {
             serviceTier: serviceTier,
             credits: credits,
             resetCreditsAvailable: payload.rateLimitResetCredits?.availableCount ?? 0,
-            fetchedAt: now
+            fetchedAt: now,
+            accountID: payload.accountId
         )
     }
 

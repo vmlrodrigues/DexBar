@@ -149,7 +149,7 @@ enum DexBarMain {
         switch state {
         case "auth", "auth-retained": loadState = .needsAuthentication
         case "cli-retained": loadState = .cliUnavailable
-        case "stale": loadState = .stale("Offline — showing the last reading.")
+        case "stale", "credits-stale": loadState = .stale("Offline — showing the last reading.")
         default: loadState = .ok
         }
         let projection: Projection?
@@ -169,7 +169,8 @@ enum DexBarMain {
                     includesResetExample: state == "history-reset",
                     includesExtendedExample: state == "history-extended"
                 )
-            } ?? []
+            } ?? [],
+            creditForecast: previewCreditForecast(state: state, snapshot: snapshot)
         )
         render(
             view: PopoverView(
@@ -232,12 +233,27 @@ enum DexBarMain {
         return UsageSnapshot(
             weekly: weekly,
             supplementary: supplementary,
-            planType: "pro",
+            planType: state.hasPrefix("credits") ? "plus" : "pro",
             serviceTier: .fast,
-            credits: UsageCredits(hasCredits: false, unlimited: false, balance: "0"),
+            credits: state.hasPrefix("credits")
+                ? UsageCredits(hasCredits: true, unlimited: state == "credits-unlimited", balance: state == "credits-empty" ? "0" : "62123.456789")
+                : UsageCredits(hasCredits: false, unlimited: false, balance: "0"),
             resetCreditsAvailable: 0,
-            fetchedAt: state == "stale" ? now.addingTimeInterval(-720) : now
+            fetchedAt: state == "stale" || state == "credits-stale" ? now.addingTimeInterval(-720) : now
         )
+    }
+
+    private static func previewCreditForecast(state: String, snapshot: UsageSnapshot?) -> CreditForecast {
+        guard state.hasPrefix("credits"), let snapshot else { return .unavailable }
+        if state == "credits-empty" { return .depleted }
+        if state == "credits-unlimited" { return .unavailable }
+        guard let balance = CreditBalance.parse(snapshot.credits?.balance) else { return .unavailable }
+        let hours = state == "credits-new" ? 2 : (state == "credits-preliminary" ? 6 : 24)
+        let samples = (0...hours).map { hour in
+            CreditSample(timestamp: snapshot.fetchedAt.addingTimeInterval(Double(hour - hours) * 3600),
+                         balance: balance + Decimal((hours - hour) * 100))
+        }
+        return CreditForecastCalculator.calculate(samples: samples)
     }
 
     @MainActor

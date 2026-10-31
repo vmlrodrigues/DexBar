@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import DexBarCore
 
 struct PopoverView: View {
@@ -167,13 +168,24 @@ struct PopoverView: View {
                 .padding(14)
                 .frame(maxWidth: .infinity)
 
-                if let credits = snapshot.credits, credits.isWorthShowing {
+                if let credits = snapshot.credits,
+                   credits.isWorthShowing || model.creditForecast == .depleted {
                     Divider()
-                    HStack {
-                        Label("Usage credits", systemImage: "wallet.bifold")
-                        Spacer()
-                        Text(credits.unlimited ? "Unlimited" : (credits.balance ?? "Available"))
-                            .fontWeight(.medium)
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack {
+                            Label("Usage credits", systemImage: "wallet.bifold")
+                            Spacer()
+                            Text(credits.displayBalance())
+                                .fontWeight(.medium)
+                                .monospacedDigit()
+                        }
+                        if !credits.unlimited, let label = creditForecastLabel {
+                            Text(label)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .help("Estimated from recorded balance decreases, blending overall spending with the last 24 hours. Preliminary until 24 hours of spending history. Assumes similar usage and no credit expiry. Top-ups, account or plan changes, and gaps over a day restart the estimate.")
+                        }
                     }
                     .font(.system(size: 11))
                     .padding(.horizontal, 14)
@@ -261,6 +273,24 @@ struct PopoverView: View {
         default: break
         }
         return model.snapshot == nil ? .secondary : .green
+    }
+
+    private var creditForecastLabel: String? {
+        let stale = model.state != .ok
+        switch model.creditForecast {
+        case .unavailable: return nil
+        case .waitingForSpending: return stale ? "Last reading · no recent credit spending" : "Waiting for credit spending"
+        case .collecting(let hours):
+            return stale ? "Last reading · collecting spending history"
+                : (hours < 6 ? "Collecting spending history · \(hours) of 6 hours"
+                             : "Waiting for more credit spending")
+        case .depleted: return stale ? "Last reading · credits depleted" : "Credits depleted"
+        case .estimate(let estimate):
+            let duration = estimate.secondsRemaining >= 365 * 86400 ? "Over a year"
+                : (estimate.secondsRemaining < 60 ? "Less than a minute" : "~" + shortDuration(estimate.secondsRemaining))
+            let prefix = stale ? "Last estimate · " : (estimate.preliminary ? "Preliminary · " : "")
+            return prefix + duration + " remaining at this pace"
+        }
     }
 
     private func stateBanner(_ text: String, symbol: String, color: Color) -> some View {
