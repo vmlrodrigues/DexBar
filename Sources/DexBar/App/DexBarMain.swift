@@ -156,6 +156,8 @@ enum DexBarMain {
         switch state {
         case "warning": projection = Projection(projectedPercent: 109, pointsPerDay: 5.0, daysRemaining: 6.95, outlook: .mayRunOut, limitReachedAt: Date().addingTimeInterval(5.2 * 86_400))
         case "critical": projection = Projection(projectedPercent: 118, pointsPerDay: 3.2, daysRemaining: 6.95, outlook: .likelyToRunOut, limitReachedAt: Date().addingTimeInterval(1.25 * 86_400))
+        case "rollover", "rollover-warning":
+            projection = snapshot.flatMap { previewRolloverProjection($0, warning: state == "rollover-warning") }
         case "current": projection = nil
         default: projection = Projection(projectedPercent: 74, pointsPerDay: 4.3, daysRemaining: 6.95, outlook: .onTrack, limitReachedAt: nil)
         }
@@ -195,6 +197,7 @@ enum DexBarMain {
         case "stale": weeklyPercent = 58
         case "history", "history-reset": weeklyPercent = 4
         case "history-extended": weeklyPercent = 0
+        case "rollover", "rollover-warning": weeklyPercent = 1
         default: weeklyPercent = state == "current" ? 1 : 44
         }
         let reset: Date
@@ -239,8 +242,45 @@ enum DexBarMain {
                 ? UsageCredits(hasCredits: true, unlimited: state == "credits-unlimited", balance: state == "credits-empty" ? "0" : "62123.456789")
                 : UsageCredits(hasCredits: false, unlimited: false, balance: "0"),
             resetCreditsAvailable: 0,
-            fetchedAt: state == "stale" || state == "credits-stale" ? now.addingTimeInterval(-720) : now
+            fetchedAt: state == "stale" || state == "credits-stale" ? now.addingTimeInterval(-720) : now,
+            accountID: state.hasPrefix("rollover") ? "test-account" : nil
         )
+    }
+
+    /// Replay a previous allowance and an overnight pause through the real engine.
+    /// All readings are synthetic and the in-memory store never opens live history.
+    private static func previewRolloverProjection(_ current: UsageSnapshot, warning: Bool) -> Projection? {
+        let store = UsageHistoryStore.inMemory()
+        let day: TimeInterval = 86_400
+        let currentStart = current.weekly.resetsAt.addingTimeInterval(-7 * day)
+        let previousReset = currentStart.addingTimeInterval(-12 * 3_600)
+        func reading(percent: Double, at: Date, reset: Date) -> UsageSnapshot {
+            UsageSnapshot(
+                weekly: UsageWindow(
+                    id: current.weekly.id, bucketID: current.weekly.bucketID,
+                    bucketName: current.weekly.bucketName, usedPercent: percent,
+                    durationMinutes: current.weekly.durationMinutes, resetsAt: reset
+                ),
+                supplementary: [], planType: current.planType, credits: nil,
+                resetCreditsAvailable: 0, fetchedAt: at, accountID: "test-account"
+            )
+        }
+        for offset in 0...3 {
+            store.record(reading(
+                percent: Double(offset) * (warning ? 22 : 10),
+                at: previousReset.addingTimeInterval(Double(offset - 4) * day),
+                reset: previousReset
+            ))
+        }
+        store.record(reading(
+            percent: warning ? 96 : 42,
+            at: previousReset.addingTimeInterval(-30 * 60), reset: previousReset
+        ))
+        store.record(reading(percent: 0, at: currentStart, reset: current.weekly.resetsAt))
+        store.record(current)
+        let projection = store.weeklyProjection(for: current)
+        precondition(projection?.historicalPointsPerDay != nil, "Rollover preview must use historical pace")
+        return projection
     }
 
     private static func previewCreditForecast(state: String, snapshot: UsageSnapshot?) -> CreditForecast {

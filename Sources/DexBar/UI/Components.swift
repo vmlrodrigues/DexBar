@@ -119,6 +119,14 @@ struct UsageMeter: View {
                 .frame(height: 12)
                 .padding(.trailing, Self.chevronGutter)
             }
+            if let projection, window.isWeekly, projection.historicalPointsPerDay != nil {
+                Text("Based on recent history")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(projectionDetail(projection))
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(window.title)
@@ -135,13 +143,29 @@ struct UsageMeter: View {
 
     private var accessibilityValue: String {
         var value = "\(window.roundedPercent) percent used"
-        if let projection { value += ", projected \(projection.projectedPercent) percent" }
+        if let projection {
+            value += ", projected \(projection.projectedPercent) percent"
+            if window.isWeekly, projection.historicalPointsPerDay != nil {
+                value += ", based on recent history"
+            }
+            if projection.isPreliminary { value += ", preliminary forecast" }
+        }
         return value
     }
 
     private func projectionDetail(_ projection: Projection) -> String {
         var lines: [String]
-        if let recent = projection.recentPointsPerDay {
+        if let historical = projection.historicalPointsPerDay {
+            lines = [String(
+                format: "Uses a recent previous allowance pace of %.1f percentage points per day, measured over elapsed time including pauses.",
+                historical
+            )]
+            lines.append("This week's measured pace gradually replaces that history during its first 24 hours.")
+            lines.append(
+                "This preliminary forecast has a range of "
+                    + "\(projection.lowerProjectedPercent)–\(projection.upperProjectedPercent)%; early activity may not represent a full day."
+            )
+        } else if let recent = projection.recentPointsPerDay {
             lines = [String(
                 format: "Blends a smoothed recent pace (%.1f points/day) with the window average (%.1f points/day).",
                 recent,

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// A cumulative allowance reading at an absolute instant. No recording time zone or
 /// local-day key is stored; cycle identity is resolved once, before any presentation.
@@ -18,6 +19,24 @@ public final class UsageHistoryStore {
         var timestampEncoding = "unixSecondsUTC"
         var readings: [UsageHistoryReading] = []
         var legacyIntervals: [LegacyUsageInterval]? = []
+        // Optional additions preserve compatibility with existing UTC documents.
+        // Bind legacy observations on first identified refresh; future identity
+        // changes establish a forecast cutoff without deleting daily history.
+        var projectionIdentity: String?
+        var projectionHistorySince: Date?
+        var projectionIdentityUnavailable: Bool?
+    }
+
+    /// Older schema-2 writers discard unfamiliar inline fields. Keep the scope
+    /// separately, with a checkpoint that cannot bless their later observations.
+    private struct ForecastScope: Codable {
+        var schemaVersion = 1
+        var timestampEncoding = "unixSecondsUTC"
+        var identity: String?
+        var historySince: Date?
+        var identityUnavailable: Bool
+        var recordedThrough: Date?
+        var readingsHash: String?
     }
 
     private var document = Document()
@@ -26,6 +45,13 @@ public final class UsageHistoryStore {
     private let calendar: Calendar
     private let retention: TimeInterval
     private var canPersist = true
+    private var durableForecastScope: ForecastScope?
+    private var forecastScopeBlocked = false
+    private var forecastScopeNeedsFreshBaseline = false
+    private var forecastScopeError: String?
+    private var isLoading = false
+    private var pendingHistoryPersistence = false
+    private var forecastScopeURL: URL? { url?.appendingPathExtension("forecast-scope.json") }
     private struct PresentationCache {
         let calendar: Calendar
         let reducer: UsageHistoryAccumulator
@@ -49,6 +75,9 @@ public final class UsageHistoryStore {
         self.legacyURL = legacyURL
         self.calendar = calendar
         self.retention = retention
+        isLoading = true
+        loadForecastScope()
+        defer { finishLoadingForecastScope() }
         let source = FileManager.default.fileExists(atPath: url.path) ? url : (legacyURL ?? url)
         guard FileManager.default.fileExists(atPath: source.path) else { return }
         do {
@@ -130,9 +159,89 @@ public final class UsageHistoryStore {
     }
 
     public func record(_ snapshot: UsageSnapshot) {
+        let previousLatest = document.readings.map(\.timestamp).max()
         guard ingest(window: snapshot.weekly, at: snapshot.fetchedAt) else { return }
+        updateProjectionIdentity(snapshot, previousLatest: previousLatest)
         trim(relativeTo: snapshot.fetchedAt)
         persist()
+    }
+
+    /// Weekly forecasts share the daily view's canonical UTC allowance identity.
+    /// Only recent measured readings contribute; local calendar boundaries do not.
+    public func weeklyProjection(for snapshot: UsageSnapshot) -> Projection? {
+        guard !forecastScopeBlocked, !forecastScopeNeedsFreshBaseline, forecastScopeError == nil else { return nil }
+        let now = snapshot.fetchedAt
+        let identity = Self.projectionIdentity(for: snapshot)
+        // Rejected duplicate/out-of-order polls must not expose another account's
+        // mature current-cycle forecast, or replay evidence from a future clock.
+        guard identity == document.projectionIdentity,
+              document.readings.last(where: { $0.windowID == snapshot.weekly.id })?.timestamp == now else {
+            return nil
+        }
+        let cutoff = max(now.addingTimeInterval(-8 * 86_400), document.projectionHistorySince ?? .distantPast)
+        let readings = document.readings.filter {
+            $0.windowID == snapshot.weekly.id && $0.durationMinutes == snapshot.weekly.durationMinutes
+                && $0.timestamp >= cutoff && $0.timestamp <= now
+        }
+        let groups = Dictionary(grouping: readings, by: \.cycleStartedAt)
+        let cycles = groups.values.compactMap { group -> WeeklyProjectionCycle? in
+            guard let first = group.first else { return nil }
+            return WeeklyProjectionCycle(startsAt: first.cycleStartedAt, startKnown: first.cycleStartKnown,
+                durationMinutes: first.durationMinutes,
+                samples: group.map {
+                    ProjectionSample(windowID: $0.windowID, timestamp: $0.timestamp,
+                                     usedPercent: $0.usedPercent, resetsAt: $0.resetsAt)
+                })
+        }.sorted { $0.samples[0].timestamp < $1.samples[0].timestamp }
+        return ProjectionCalculator.weekly(window: snapshot.weekly, cycles: cycles, now: now,
+            allowHistorical: identity != nil && identity == document.projectionIdentity)
+    }
+
+    private static func projectionIdentity(for snapshot: UsageSnapshot) -> String? {
+        guard let account = snapshot.accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !account.isEmpty else { return nil }
+        let plan = snapshot.planType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let data = try? JSONEncoder().encode([account, plan])
+        return data.map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() }
+    }
+
+    private func updateProjectionIdentity(_ snapshot: UsageSnapshot, previousLatest: Date?) {
+        let identity = Self.projectionIdentity(for: snapshot)
+        // A poll can be fresh for a newly selected bucket while the clock is
+        // behind another bucket's old observations. Exclude every prior-scope
+        // reading, including those whose timestamps are still in the future.
+        let cutoff: Date
+        if let previousLatest, previousLatest >= snapshot.fetchedAt {
+            // The persisted Unix epoch can have a larger ULP than Date's reference
+            // epoch. Advance both so JSON round trips retain a strict exclusion.
+            cutoff = max(
+                Date(timeIntervalSinceReferenceDate: previousLatest.timeIntervalSinceReferenceDate.nextUp),
+                Date(timeIntervalSince1970: previousLatest.timeIntervalSince1970.nextUp)
+            )
+        } else {
+            cutoff = snapshot.fetchedAt
+        }
+        // An older writer may have appended observations after the durable
+        // checkpoint. Only a new accepted identified/unknown reading can bind
+        // this session again; calendar replay and repairs cannot do so.
+        if forecastScopeNeedsFreshBaseline {
+            document.projectionHistorySince = cutoff
+            forecastScopeNeedsFreshBaseline = false
+        }
+        if identity == nil {
+            if document.projectionIdentityUnavailable != true {
+                document.projectionHistorySince = cutoff
+            }
+            document.projectionIdentity = nil
+            document.projectionIdentityUnavailable = true
+        } else {
+            if document.projectionIdentityUnavailable == true
+                || (document.projectionIdentity != nil && document.projectionIdentity != identity) {
+                document.projectionHistorySince = cutoff
+            }
+            document.projectionIdentity = identity
+            document.projectionIdentityUnavailable = false
+        }
     }
 
     /// Backfill only a genuinely new history. A migrated document already incorporates
@@ -179,12 +288,20 @@ public final class UsageHistoryStore {
         presentationCache = nil
         canPersist = true
         persistenceError = nil
+        durableForecastScope = nil
+        forecastScopeBlocked = false
+        forecastScopeNeedsFreshBaseline = false
+        forecastScopeError = nil
+        pendingHistoryPersistence = false
         guard let url else { return }
         do {
             let manager = FileManager.default
             if manager.fileExists(atPath: url.path) { try manager.removeItem(at: url) }
             // Otherwise clearing followed by a relaunch would re-import the retired file.
             if let legacyURL, manager.fileExists(atPath: legacyURL.path) { try manager.removeItem(at: legacyURL) }
+            if let forecastScopeURL, manager.fileExists(atPath: forecastScopeURL.path) {
+                try manager.removeItem(at: forecastScopeURL)
+            }
             // Clear automatic migration backups along with the live history.
             let siblings = try manager.contentsOfDirectory(at: url.deletingLastPathComponent(), includingPropertiesForKeys: nil)
             for file in siblings where file.lastPathComponent.hasPrefix(url.lastPathComponent + ".v1-backup-")
@@ -192,7 +309,11 @@ public final class UsageHistoryStore {
                 || file.lastPathComponent.hasPrefix(url.lastPathComponent + ".v2-backup-") {
                 try manager.removeItem(at: file)
             }
-        } catch { persistenceError = "Could not clear usage history: \(error.localizedDescription)" }
+        } catch {
+            forecastScopeBlocked = true
+            forecastScopeError = "Could not clear usage history: \(error.localizedDescription)"
+            persistenceError = forecastScopeError
+        }
     }
 
     private func ingest(window: UsageWindow, at timestamp: Date) -> Bool {
@@ -324,7 +445,17 @@ public final class UsageHistoryStore {
     }
 
     private func persist() {
+        if isLoading {
+            pendingHistoryPersistence = true
+            return
+        }
         guard canPersist, let url else { return }
+        guard !forecastScopeBlocked else {
+            persistenceError = forecastScopeError
+            return
+        }
+        // Initial repairs must not advance a checkpoint past unscoped readings.
+        guard !forecastScopeNeedsFreshBaseline, persistForecastScope() else { return }
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             let encoder = JSONEncoder()
@@ -333,6 +464,113 @@ public final class UsageHistoryStore {
             try encoder.encode(document).write(to: url, options: .atomic)
             persistenceError = nil
         } catch { persistenceError = "Could not save usage history: \(error.localizedDescription)" }
+    }
+
+    private func loadForecastScope() {
+        guard let forecastScopeURL, FileManager.default.fileExists(atPath: forecastScopeURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: forecastScopeURL)
+            let header = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            guard header?["schemaVersion"] as? Int == 1 else {
+                forecastScopeBlocked = true
+                forecastScopeError = "Weekly forecast scope was written by an unsupported DexBar version."
+                persistenceError = forecastScopeError
+                return
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .secondsSince1970
+            let scope = try decoder.decode(ForecastScope.self, from: data)
+            func validHash(_ value: String) -> Bool {
+                value.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil
+            }
+            guard scope.timestampEncoding == "unixSecondsUTC",
+                  scope.identity.map(validHash) ?? scope.identityUnavailable,
+                  scope.identity == nil || !scope.identityUnavailable,
+                  scope.historySince.map({ $0.timeIntervalSince1970.isFinite }) ?? true,
+                  scope.recordedThrough.map({ $0.timeIntervalSince1970.isFinite }) ?? true,
+                  scope.readingsHash.map(validHash) ?? true else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+            durableForecastScope = scope
+        } catch {
+            // Preserve unreadable and future scope files exactly. Re-adopting the
+            // history here would restore evidence deliberately excluded earlier.
+            forecastScopeBlocked = true
+            forecastScopeError = "Could not load weekly forecast scope: \(error.localizedDescription)"
+            persistenceError = forecastScopeError
+        }
+    }
+
+    private func finishLoadingForecastScope() {
+        isLoading = false
+        if let scope = durableForecastScope {
+            document.projectionIdentity = scope.identity
+            document.projectionHistorySince = scope.historySince
+            document.projectionIdentityUnavailable = scope.identityUnavailable
+            let latest = document.readings.max { $0.timestamp < $1.timestamp }
+            forecastScopeNeedsFreshBaseline = scope.recordedThrough == nil
+                || scope.readingsHash == nil
+                || latest?.timestamp != scope.recordedThrough
+                || Self.forecastReadingsHash(document.readings) != scope.readingsHash
+        } else if !forecastScopeBlocked,
+                  document.projectionIdentity != nil || document.projectionIdentityUnavailable != nil
+                    || document.projectionHistorySince != nil {
+            // Migrate the inline scope before an older writer can erase it. This
+            // does not rewrite the history document merely because it was opened.
+            _ = persistForecastScope()
+        }
+        if pendingHistoryPersistence {
+            pendingHistoryPersistence = false
+            persist()
+        }
+        if let forecastScopeError { persistenceError = forecastScopeError }
+    }
+
+    private static func forecastReadingsHash(_ readings: [UsageHistoryReading]) -> String? {
+        let normalized = readings.sorted {
+            if $0.timestamp != $1.timestamp { return $0.timestamp < $1.timestamp }
+            if $0.windowID != $1.windowID { return $0.windowID < $1.windowID }
+            if $0.resetsAt != $1.resetsAt { return $0.resetsAt < $1.resetsAt }
+            if $0.cycleStartedAt != $1.cycleStartedAt { return $0.cycleStartedAt < $1.cycleStartedAt }
+            if $0.durationMinutes != $1.durationMinutes { return $0.durationMinutes < $1.durationMinutes }
+            if $0.usedPercent != $1.usedPercent { return $0.usedPercent < $1.usedPercent }
+            return !$0.cycleStartKnown && $1.cycleStartKnown
+        }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        encoder.outputFormatting = [.sortedKeys]
+        return (try? encoder.encode(normalized)).map {
+            SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined()
+        }
+    }
+
+    /// The sidecar is committed before the history document. A failed scope write
+    /// must never leave new-account readings behind under the previous scope.
+    private func persistForecastScope() -> Bool {
+        guard let forecastScopeURL else { return true }
+        guard !forecastScopeBlocked else { return false }
+        guard document.projectionIdentity != nil || document.projectionIdentityUnavailable != nil
+                || document.projectionHistorySince != nil else { return true }
+        let latest = document.readings.max { $0.timestamp < $1.timestamp }
+        let scope = ForecastScope(identity: document.projectionIdentity,
+            historySince: document.projectionHistorySince,
+            identityUnavailable: document.projectionIdentityUnavailable ?? (document.projectionIdentity == nil),
+            recordedThrough: latest?.timestamp, readingsHash: Self.forecastReadingsHash(document.readings))
+        do {
+            try FileManager.default.createDirectory(at: forecastScopeURL.deletingLastPathComponent(),
+                                                  withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .secondsSince1970
+            encoder.outputFormatting = [.sortedKeys]
+            try encoder.encode(scope).write(to: forecastScopeURL, options: .atomic)
+            durableForecastScope = scope
+            forecastScopeError = nil
+            return true
+        } catch {
+            forecastScopeError = "Could not save weekly forecast scope: \(error.localizedDescription)"
+            persistenceError = forecastScopeError
+            return false
+        }
     }
 
     private struct CycleKey: Hashable {

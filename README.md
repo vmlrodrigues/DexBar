@@ -24,9 +24,9 @@ SwiftUI and AppKit, contains no web view, and stays out of the Dock. The normal 
 deliberately quiet: weekly usage remains primary, while shorter or model-specific limits
 surface only when Codex reports that they matter.
 
-Version **0.2.5** shows a preliminary credit forecast after one hour of spending history,
-with collection progress displayed in minutes.
-See the [0.2.5 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.2.5).
+Version **0.2.6** keeps weekly forecasts available across allowance rollovers, using recent
+history while the new week gathers observations.
+See the [0.2.6 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.2.6).
 
 <p align="center">
   <a href="Docs/DexBar-current.png"><img src="Docs/DexBar-current.png" width="600" alt="DexBar showing the minimal weekly usage view"></a>
@@ -45,8 +45,10 @@ See the [0.2.5 release notes](https://github.com/vmlrodrigues/DexBar/releases/ta
   been used or reached.
 - Model-specific long windows once they reach warning territory, without filling the popover
   with inactive or low-usage meters.
-- A local weekly projection after 24 hours of history for the same reset window. When enough
-  recent movement exists, DexBar blends the full-window pace with a recency-weighted trend.
+- A local weekly projection that carries recent measured pace across allowance rollovers.
+  During the new week's first day it is labelled **Based on recent history** and gradually
+  switches to that week's observations. With no usable prior history, it waits for 24 hours.
+  When enough recent movement exists, DexBar blends the window pace with a recency-weighted trend.
 - A compact daily history for the current and recent weekly windows, including honest markers
   when this Mac did not observe enough data to attribute usage to an exact day.
 - A deliberately quiet short-window projection after one hour, shown only when it points to
@@ -122,6 +124,10 @@ context. Inactive short windows remain invisible.
 Projection is shown on the same meter. The marker indicates the central estimate; its tooltip
 explains the measured pace, uncertainty range, and estimated limit time when applicable. Orange
 and red appear only when the uncertainty range says the allowance may or is likely to run out.
+Weekly forecasts measure elapsed time, including quiet periods. A closely observed overnight
+pause before the next allowance starts also counts; unknown gaps are not assumed to be idle.
+Prior usage percentages never carry into the new allowance. Forecast-based alerts wait until
+the current allowance has a full day of evidence; actual 80% and 95% usage alerts work as usual.
 
 <p align="center">
   <a href="Docs/DexBar-projection-warning.png"><img src="Docs/DexBar-projection-warning.png" width="600" alt="DexBar warning that projected weekly usage exceeds the limit"></a>
@@ -173,6 +179,12 @@ for eight days in `~/Library/Application Support/DexBar/projection-history.json`
 are retained for thirteen weeks in `~/Library/Application Support/DexBar/usage-readings.json`
 (with one preceding baseline for retained cycles). Local days and coverage markers are derived
 for display, rather than saved separately for each time zone.
+Weekly forecasting uses only the latest eight days of those UTC readings. An account-and-plan
+hash prevents future account or plan changes from borrowing earlier pace, while leaving daily
+history intact. Existing unscoped readings are adopted on the first identified refresh.
+Forecast account boundaries are also saved in `usage-readings.json.forecast-scope.json`, so an
+older DexBar version cannot erase them when saving usage history. Readings added by an older
+version after that checkpoint start fresh forecast evidence on the next successful refresh.
 Credit balances and UTC observation times are retained for eight days in `credit-history.json`,
 with a SHA-256 account-and-plan hash to separate forecasts without storing the raw account ID.
 Credit history is recorded only while the service provides an account identity.
@@ -219,8 +231,8 @@ development build: its menu-bar symbol is a hammer, automatic updates and login-
 are disabled, and the About pane identifies it as Development. The build script refuses to
 replace that exact development bundle while it is running.
 
-The number in parentheses after the version is the build number: **0.2.5 (27)** identifies the
-0.2.5 release. Builds derive this number from the Git commit count, so new commits increase it;
+The number in parentheses after the version is the build number: **0.2.6 (29)** identifies the
+0.2.6 release. Builds derive this number from the Git commit count, so new commits increase it;
 rebuilding the same commit keeps the same number. Sparkle uses it to compare updates.
 
 Regenerate every standard and Retina icon representation, plus `Resources/AppIcon.icns`, with:

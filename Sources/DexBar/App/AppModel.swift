@@ -15,6 +15,7 @@ enum LoadState: Equatable {
 final class AppModel: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot?
     @Published private(set) var creditForecast: CreditForecast = .unavailable
+    @Published private var recordedWeeklyProjection: Projection?
     @Published private(set) var usageHistoryWindows: [UsageHistoryWindow] = []
     @Published private(set) var state: LoadState = .loading
     @Published private(set) var isRefreshing = false
@@ -57,6 +58,7 @@ final class AppModel: ObservableObject {
             return window.id == snapshot?.weekly.id ? previewProjection : nil
         }
         guard let snapshot else { return nil }
+        if window.id == snapshot.weekly.id, window.isWeekly { return recordedWeeklyProjection }
         return projectionStore.projection(for: window, now: snapshot.fetchedAt)
     }
 
@@ -92,6 +94,7 @@ final class AppModel: ObservableObject {
             let fresh = try await client.fetch()
             snapshot = fresh
             creditForecast = .unavailable
+            recordedWeeklyProjection = nil
             state = .ok
             historyRevision += 1
             let revision = historyRevision
@@ -105,6 +108,7 @@ final class AppModel: ObservableObject {
             }
             if historyGeneration == generation {
                 creditForecast = result.creditForecast
+                recordedWeeklyProjection = result.weeklyProjection
                 if let error = result.persistenceError { state = .stale(error) }
             }
             notifier.evaluate(snapshot: fresh, projection: weeklyProjection)
@@ -134,6 +138,7 @@ final class AppModel: ObservableObject {
         let revision = historyRevision
         usageHistoryWindows = []
         creditForecast = .unavailable
+        recordedWeeklyProjection = nil
         onChange?()
         let error = await historyWorker.clear(generation: generation)
         if historyRevision == revision {

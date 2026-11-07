@@ -7,6 +7,7 @@ public actor UsageHistoryWorker {
         public let windows: [UsageHistoryWindow]
         public let persistenceError: String?
         public let creditForecast: CreditForecast
+        public let weeklyProjection: Projection?
     }
 
     private var store: UsageHistoryStore?
@@ -52,13 +53,15 @@ public actor UsageHistoryWorker {
         }
         if let requestedGeneration, requestedGeneration < generation {
             return Result(windows: store.windows(for: snapshot.weekly.id, calendar: calendar),
-                          persistenceError: persistenceError, creditForecast: resolvedCredits().forecast)
+                          persistenceError: persistenceError, creditForecast: resolvedCredits().forecast,
+                          weeklyProjection: nil)
         }
         store.backfill(samples: projectionSamples, for: snapshot.weekly)
         store.record(snapshot)
         resolvedCredits().record(snapshot)
         return Result(windows: store.windows(for: snapshot.weekly.id, calendar: calendar),
-                      persistenceError: persistenceError, creditForecast: resolvedCredits().forecast)
+                      persistenceError: persistenceError, creditForecast: resolvedCredits().forecast,
+                      weeklyProjection: store.weeklyProjection(for: snapshot))
     }
 
     public func presentation(for windowID: String, calendar: Calendar,
