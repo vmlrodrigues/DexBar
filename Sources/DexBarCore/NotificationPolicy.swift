@@ -53,7 +53,9 @@ public struct NotificationLedger: Codable, Equatable, Sendable {
         }
 
         var weeklyState = state(for: snapshot.weekly)
-        if let projection {
+        // Early forecasts can borrow a prior allowance's pace. They must neither
+        // fire nor rearm the latch before this allowance has a full day of evidence.
+        if let projection, !projection.isPreliminary {
             if projection.projectedPercent >= 100, !weeklyState.projectionFired {
                 weeklyState.projectionFired = true
                 notifications.append(.weeklyProjection(projectedPercent: projection.projectedPercent))

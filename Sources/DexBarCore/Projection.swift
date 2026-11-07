@@ -12,6 +12,8 @@ public struct Projection: Equatable, Sendable {
     public let daysRemaining: Double
     public let outlook: Outlook
     public let limitReachedAt: Date?
+    public let isPreliminary: Bool
+    public let historicalPointsPerDay: Double?
 
     public init(
         projectedPercent: Int,
@@ -22,7 +24,9 @@ public struct Projection: Equatable, Sendable {
         upperProjectedPercent: Int? = nil,
         daysRemaining: Double,
         outlook: Outlook,
-        limitReachedAt: Date?
+        limitReachedAt: Date?,
+        isPreliminary: Bool = false,
+        historicalPointsPerDay: Double? = nil
     ) {
         self.projectedPercent = projectedPercent
         self.pointsPerDay = pointsPerDay
@@ -33,6 +37,8 @@ public struct Projection: Equatable, Sendable {
         self.daysRemaining = daysRemaining
         self.outlook = outlook
         self.limitReachedAt = limitReachedAt
+        self.isPreliminary = isPreliminary
+        self.historicalPointsPerDay = historicalPointsPerDay
     }
 }
 
@@ -58,6 +64,15 @@ public struct ProjectionSample: Codable, Equatable, Sendable {
         self.usedPercent = usedPercent
         self.resetsAt = resetsAt
     }
+}
+
+/// Cycle membership comes from the UTC history store, shared with daily history.
+/// These are derived samples only; the recorded reset dates remain untouched.
+struct WeeklyProjectionCycle {
+    let startsAt: Date
+    let startKnown: Bool
+    let durationMinutes: Int
+    let samples: [ProjectionSample]
 }
 
 public enum ProjectionCalculator {
@@ -90,7 +105,7 @@ public enum ProjectionCalculator {
         // A weekly estimate needs a full day. One hour is the equivalent share of
         // a five-hour window and matches ClawBar's backtested session estimator.
         let requiredHistory = minimumElapsed ?? (kind == .weekly ? 86_400 : 3_600)
-        guard elapsed >= requiredHistory else { return nil }
+        guard elapsed >= requiredHistory, elapsed > 0 else { return nil }
         let consumed = window.usedPercent - baseline.usedPercent
         guard consumed > 0 else { return nil }
 
@@ -108,6 +123,102 @@ public enum ProjectionCalculator {
             pointsPerDay = longTermPointsPerDay
         }
 
+        return makeProjection(window: window, now: now, kind: kind,
+                              pointsPerDay: pointsPerDay, longTermPointsPerDay: longTermPointsPerDay,
+                              recentPointsPerDay: recentPointsPerDay, elapsed: elapsed)
+    }
+
+    /// A new allowance borrows a measured pace, never an old cumulative percentage.
+    /// Its own observations replace that prior continuously over the first day.
+    static func weekly(window: UsageWindow, cycles: [WeeklyProjectionCycle], now: Date,
+                       allowHistorical: Bool) -> Projection? {
+        guard window.isWeekly, window.resetsAt > now,
+              let current = cycles.last, let first = current.samples.first,
+              let last = current.samples.last, last.timestamp == now,
+              last.usedPercent == window.usedPercent,
+              abs(last.resetsAt.timeIntervalSince(window.resetsAt)) < resetTolerance else { return nil }
+        let elapsed = now.timeIntervalSince(first.timestamp)
+        guard elapsed >= 0 else { return nil }
+
+        // Normalize only a derived copy after the shared store has resolved identity.
+        // Provisional zero-usage reset movement cannot throw away the actual baseline.
+        func normalized(_ cycle: WeeklyProjectionCycle, reset: Date) -> [ProjectionSample] {
+            cycle.samples.map {
+                ProjectionSample(windowID: window.id, timestamp: $0.timestamp,
+                                 usedPercent: $0.usedPercent, resetsAt: reset)
+            }
+        }
+        let currentSamples = normalized(current, reset: window.resetsAt)
+        let measured = calculate(window: window, samples: currentSamples, now: now,
+                                 minimumElapsed: 0)
+        if elapsed >= 86_400 {
+            // A full quiet day is evidence of zero pace, rather than another blank
+            // forecast. Small percentage corrections must not create negative spend.
+            return measured ?? makeProjection(window: window, now: now, kind: .weekly,
+                pointsPerDay: 0, longTermPointsPerDay: 0, recentPointsPerDay: nil, elapsed: elapsed)
+        }
+        guard allowHistorical else { return nil }
+
+        // At least a day of actual observations is required in the previous
+        // allowance, including a measured quiet day. An inferred cycle start
+        // cannot mature evidence or justify skipping a recent pause.
+        for previous in cycles.dropLast().reversed() where previous.durationMinutes == window.durationMinutes {
+            guard let oldFirst = previous.samples.first, let oldLast = previous.samples.last,
+                  oldLast.timestamp < first.timestamp else { continue }
+            let span = oldLast.timestamp.timeIntervalSince(oldFirst.timestamp)
+            guard span >= 86_400 else { continue }
+            let oldWindow = UsageWindow(id: window.id, bucketID: window.bucketID,
+                bucketName: window.bucketName, usedPercent: oldLast.usedPercent,
+                durationMinutes: previous.durationMinutes, resetsAt: oldLast.resetsAt)
+            guard let prior = calculate(window: oldWindow,
+                samples: normalized(previous, reset: oldLast.resetsAt), now: oldLast.timestamp)
+                ?? makeProjection(window: oldWindow, now: oldLast.timestamp, kind: .weekly,
+                    pointsPerDay: 0, longTermPointsPerDay: 0, recentPointsPerDay: nil, elapsed: span) else { continue }
+
+            // A deferred start after a closely observed natural expiry is a known
+            // pause. Do not invent zero usage in an unobserved tail or a long gap.
+            let tail = oldLast.resetsAt.timeIntervalSince(oldLast.timestamp)
+            let gap = current.startsAt.timeIntervalSince(oldLast.resetsAt)
+            let idle = current.startKnown && tail >= 0 && tail <= 3_600 && gap >= 0 && gap <= 86_400
+                ? gap : 0
+            let scale = span / (span + idle)
+            let historical = prior.pointsPerDay * scale
+            let historicalLong = prior.longTermPointsPerDay * scale
+            let currentWeight = elapsed / 86_400
+            let weight = 1 - currentWeight
+            let measuredLong = measured?.longTermPointsPerDay ?? 0
+            let measuredRate = measured?.pointsPerDay ?? 0
+            let measuredRecent = measured?.recentPointsPerDay
+            let oldLow = min(prior.longTermPointsPerDay, prior.recentPointsPerDay ?? prior.longTermPointsPerDay) * scale
+            let oldHigh = max(prior.longTermPointsPerDay, prior.recentPointsPerDay ?? prior.longTermPointsPerDay) * scale
+            let newLow = min(measuredLong, measuredRecent ?? measuredLong)
+            let newHigh = max(measuredLong, measuredRecent ?? measuredLong)
+            // Each rounded delta can be off by one percentage point. Propagate
+            // those rate errors independently; averaging the observation spans
+            // would hide a young current rate behind an older, longer baseline.
+            let historicalRateError = weight * 86_400 / (span + idle)
+            let currentRateError = elapsed > 0 ? currentWeight * 86_400 / elapsed : 0
+            return makeProjection(window: window, now: now, kind: .weekly,
+                pointsPerDay: historical * weight + measuredRate * currentWeight,
+                longTermPointsPerDay: historicalLong * weight + measuredLong * currentWeight,
+                recentPointsPerDay: measuredRecent,
+                elapsed: elapsed,
+                lowerRate: oldLow * weight + newLow * currentWeight,
+                upperRate: oldHigh * weight + newHigh * currentWeight,
+                measurementRateError: historicalRateError + currentRateError,
+                isPreliminary: true, historicalPointsPerDay: historical)
+        }
+        return nil
+    }
+
+    private static func makeProjection(
+        window: UsageWindow, now: Date, kind: ProjectionKind,
+        pointsPerDay: Double, longTermPointsPerDay: Double, recentPointsPerDay: Double?, elapsed: TimeInterval,
+        lowerRate: Double? = nil, upperRate: Double? = nil,
+        measurementRateError: Double? = nil,
+        isPreliminary: Bool = false, historicalPointsPerDay: Double? = nil
+    ) -> Projection? {
+        guard pointsPerDay.isFinite, pointsPerDay >= 0, window.usedPercent.isFinite else { return nil }
         let daysRemaining = max(0, window.resetsAt.timeIntervalSince(now)) / 86_400
         let rawProjection = window.usedPercent + pointsPerDay * daysRemaining
         let longTermProjection = window.usedPercent + longTermPointsPerDay * daysRemaining
@@ -115,15 +226,16 @@ public enum ProjectionCalculator {
         // The service currently reports whole percentage points. Preserve a conservative
         // evidence band even when only the long-term pace is available, so a rounded 99%
         // estimate is never presented as confidently below the limit.
-        let measurementMargin = max(
-            2.0,
-            0.5 + daysRemaining / max(elapsed / 86_400, 1.0 / 24.0)
-        )
+        let rateMargin = measurementRateError.map { daysRemaining * $0 }
+            ?? (daysRemaining / max(elapsed / 86_400, 1.0 / 24.0))
+        let measurementMargin = max(2.0, 0.5 + rateMargin)
         let lowerProjection = max(
             window.usedPercent,
-            min(longTermProjection, recentProjection ?? longTermProjection) - measurementMargin
+            (lowerRate.map { window.usedPercent + $0 * daysRemaining }
+                ?? min(longTermProjection, recentProjection ?? longTermProjection)) - measurementMargin
         )
-        let upperProjection = max(longTermProjection, recentProjection ?? longTermProjection)
+        let upperProjection = (upperRate.map { window.usedPercent + $0 * daysRemaining }
+            ?? max(longTermProjection, recentProjection ?? longTermProjection))
             + measurementMargin
         let lowerProjectedPercent = Int(floor(lowerProjection))
         let upperProjectedPercent = max(lowerProjectedPercent, Int(ceil(upperProjection)))
@@ -153,7 +265,9 @@ public enum ProjectionCalculator {
             upperProjectedPercent: upperProjectedPercent,
             daysRemaining: daysRemaining,
             outlook: outlook,
-            limitReachedAt: limitReachedAt
+            limitReachedAt: limitReachedAt,
+            isPreliminary: isPreliminary,
+            historicalPointsPerDay: historicalPointsPerDay
         )
     }
 
