@@ -38,5 +38,11 @@ let package = Package(
             path: "Tests/DexBarCoreTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .testTarget(
+            name: "DexBarTests",
+            dependencies: ["DexBar", "DexBarCore"],
+            path: "Tests/DexBarTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

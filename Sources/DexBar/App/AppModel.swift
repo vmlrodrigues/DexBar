@@ -13,12 +13,20 @@ enum LoadState: Equatable {
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published private(set) var snapshot: UsageSnapshot?
-    @Published private(set) var creditForecast: CreditForecast = .unavailable
-    @Published private var recordedWeeklyProjection: Projection?
-    @Published private(set) var usageHistoryWindows: [UsageHistoryWindow] = []
-    @Published private(set) var state: LoadState = .loading
+    private struct Presentation {
+        var snapshot: UsageSnapshot?
+        var creditForecast: CreditForecast = .unavailable
+        var weeklyProjection: Projection?
+        var historyWindows: [UsageHistoryWindow] = []
+        var state: LoadState = .loading
+    }
+
+    @Published private var presentation = Presentation()
     @Published private(set) var isRefreshing = false
+
+    var snapshot: UsageSnapshot? { presentation.snapshot }
+    var creditForecast: CreditForecast { presentation.creditForecast }
+    var state: LoadState { presentation.state }
 
     var onChange: (() -> Void)?
     let notifier = Notifier()
@@ -27,10 +35,11 @@ final class AppModel: ObservableObject {
     private let projectionStore: ProjectionStore
     private let historyWorker: UsageHistoryWorker
     private var usesPreviewProjection = false
-    private var previewProjection: Projection?
+    private var isPreparingReading = false
     private var timeZoneObserver: AnyCancellable?
     private var historyRevision = 0
     private var historyGeneration = 0
+    private var historyClearError: String?
 
     init(
         client: CodexAppServerClient = CodexAppServerClient(),
@@ -55,29 +64,31 @@ final class AppModel: ObservableObject {
 
     func projection(for window: UsageWindow) -> Projection? {
         if usesPreviewProjection {
-            return window.id == snapshot?.weekly.id ? previewProjection : nil
+            return window.id == snapshot?.weekly.id ? presentation.weeklyProjection : nil
         }
         guard let snapshot else { return nil }
-        if window.id == snapshot.weekly.id, window.isWeekly { return recordedWeeklyProjection }
+        if window.id == snapshot.weekly.id, window.isWeekly { return presentation.weeklyProjection }
         return projectionStore.projection(for: window, now: snapshot.fetchedAt)
     }
 
     var worstPercent: Int { snapshot?.worstPercent ?? 0 }
 
     func usageHistory(for window: UsageWindow) -> [UsageHistoryWindow] {
-        usageHistoryWindows.filter { $0.windowID == window.id }
+        presentation.historyWindows.filter { $0.windowID == window.id }
     }
 
     func refreshHistoryPresentation() {
-        guard !usesPreviewProjection, let snapshot else { return }
+        guard !usesPreviewProjection, isPreparingReading || snapshot != nil else { return }
         historyRevision += 1
+        // The pending reading will replay history for its own window and time zone.
+        guard !isPreparingReading, let snapshot else { return }
         let revision = historyRevision
         let generation = historyGeneration
         let calendar = Calendar.current
         Task {
             let windows = await historyWorker.presentation(for: snapshot.weekly.id, calendar: calendar, generation: generation)
             guard historyRevision == revision else { return }
-            usageHistoryWindows = windows
+            presentation.historyWindows = windows
         }
     }
 
@@ -92,39 +103,44 @@ final class AppModel: ObservableObject {
 
         do {
             let fresh = try await client.fetch()
-            snapshot = fresh
-            creditForecast = .unavailable
-            recordedWeeklyProjection = nil
-            state = .ok
+            isPreparingReading = true
+            defer { isPreparingReading = false }
             historyRevision += 1
-            let revision = historyRevision
+            var revision = historyRevision
             let generation = historyGeneration
             let samples = projectionStore.recordedSamples(for: fresh.weekly.id)
-            projectionStore.record(fresh)
             let result = await historyWorker.update(fresh,
                 projectionSamples: samples, calendar: Calendar.current, generation: generation)
-            if historyRevision == revision {
-                usageHistoryWindows = result.windows
+            var windows = result.windows
+            while historyGeneration == generation, historyRevision != revision {
+                revision = historyRevision
+                windows = await historyWorker.presentation(for: fresh.weekly.id,
+                    calendar: Calendar.current, generation: generation)
             }
+            // Keep the last complete reading visible until its replacement is ready.
             if historyGeneration == generation {
-                creditForecast = result.creditForecast
-                recordedWeeklyProjection = result.weeklyProjection
-                if let error = result.persistenceError { state = .stale(error) }
+                projectionStore.record(fresh)
+                presentation = Presentation(snapshot: fresh, creditForecast: result.creditForecast,
+                    weeklyProjection: result.weeklyProjection, historyWindows: windows,
+                    state: result.persistenceError.map(LoadState.stale) ?? .ok)
+            } else {
+                // Clear History superseded the derived data, but the usage reading is valid.
+                presentation = Presentation(snapshot: fresh, state: historyClearError.map(LoadState.stale) ?? .ok)
             }
             notifier.evaluate(snapshot: fresh, projection: weeklyProjection)
         } catch let error as CodexClientError {
             switch error {
             case .cliUnavailable:
-                state = .cliUnavailable
+                presentation.state = .cliUnavailable
             case .authenticationRequired:
-                state = .needsAuthentication
+                presentation.state = .needsAuthentication
             default:
-                state = snapshot == nil
+                presentation.state = snapshot == nil
                     ? .failed(error.localizedDescription)
                     : .stale(error.localizedDescription)
             }
         } catch {
-            state = snapshot == nil
+            presentation.state = snapshot == nil
                 ? .failed(error.localizedDescription)
                 : .stale(error.localizedDescription)
         }
@@ -134,15 +150,19 @@ final class AppModel: ObservableObject {
         projectionStore.clear()
         historyRevision += 1
         historyGeneration += 1
+        historyClearError = nil
         let generation = historyGeneration
         let revision = historyRevision
-        usageHistoryWindows = []
-        creditForecast = .unavailable
-        recordedWeeklyProjection = nil
+        var cleared = presentation
+        cleared.historyWindows = []
+        cleared.creditForecast = .unavailable
+        cleared.weeklyProjection = nil
+        presentation = cleared
         onChange?()
         let error = await historyWorker.clear(generation: generation)
         if historyRevision == revision {
-            if let error { state = .stale(error) }
+            historyClearError = error
+            if let error { presentation.state = .stale(error) }
             onChange?()
         }
         return error == nil
@@ -159,12 +179,9 @@ final class AppModel: ObservableObject {
             projectionStore: .inMemory(),
             usageHistoryStore: .inMemory()
         )
-        model.snapshot = snapshot
-        model.state = state
+        model.presentation = Presentation(snapshot: snapshot, creditForecast: creditForecast,
+            weeklyProjection: projection, historyWindows: usageHistoryWindows, state: state)
         model.usesPreviewProjection = true
-        model.previewProjection = projection
-        model.creditForecast = creditForecast
-        model.usageHistoryWindows = usageHistoryWindows
         return model
     }
 }

@@ -72,10 +72,15 @@ struct PopoverView: View {
             Button {
                 Task { await model.refresh() }
             } label: {
-                if model.isRefreshing { ProgressView().controlSize(.small) }
-                else { Image(systemName: "arrow.clockwise") }
+                Group {
+                    if model.isRefreshing { ProgressView().controlSize(.small) }
+                    else { Image(systemName: "arrow.clockwise") }
+                }
+                .frame(width: 20, height: 20)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Refresh usage")
+            .accessibilityValue(model.isRefreshing ? "Refreshing" : "")
             .help("Refresh usage")
             .disabled(model.isRefreshing)
             .mouseOnlyPopoverControl()
