@@ -125,6 +125,7 @@ struct PopoverView: View {
     @ViewBuilder
     private var mainContent: some View {
         if let snapshot = model.snapshot {
+            let weeklyProjection = model.weeklyProjection
             VStack(spacing: 0) {
                 if case .needsAuthentication = model.state {
                     recoveryBanner(
@@ -149,7 +150,7 @@ struct PopoverView: View {
                     } label: {
                         UsageWindowRow(
                             window: snapshot.weekly,
-                            projection: model.weeklyProjection,
+                            projection: weeklyProjection,
                             historyHint: true,
                             now: now
                         )
@@ -159,7 +160,9 @@ struct PopoverView: View {
                     .keyboardShortcut(.rightArrow, modifiers: [])
                     .help("Show daily usage history (Right Arrow)")
                     .accessibilityLabel("Weekly usage. Show daily history.")
+                    .accessibilityValue(UsageMeter.accessibilityValue(for: snapshot.weekly, projection: weeklyProjection))
                     .mouseOnlyPopoverControl()
+                    .forecastInfoControl()
                     ForEach(snapshot.supplementary) { window in
                         Divider()
                         UsageWindowRow(
@@ -168,6 +171,7 @@ struct PopoverView: View {
                             showContext: true,
                             now: now
                         )
+                        .forecastInfoControl()
                     }
                 }
                 .padding(14)

@@ -24,9 +24,9 @@ SwiftUI and AppKit, contains no web view, and stays out of the Dock. The normal 
 deliberately quiet: weekly usage remains primary, while shorter or model-specific limits
 surface only when Codex reports that they matter.
 
-Version **0.2.7** keeps the current usage reading visible while the popover refreshes,
-so forecasts no longer disappear and cause the window to jump.
-See the [0.2.7 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.2.7).
+Version **0.3.0** shows the forecast range directly on the usage bar. The info button explains
+how to read the range and how to tell when it extends past your allowance.
+See the [0.3.0 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.3.0).
 
 <p align="center">
   <a href="Docs/DexBar-current.png"><img src="Docs/DexBar-current.png" width="600" alt="DexBar showing the minimal weekly usage view"></a>
@@ -116,24 +116,27 @@ An active short window appears beneath the weekly allowance, with its model or b
 context. Inactive short windows remain invisible.
 
 <p align="center">
-  <a href="Docs/DexBar-active-window.png"><img src="Docs/DexBar-active-window.png" width="560" alt="DexBar showing an active five-hour model window"></a>
+  <a href="Docs/DexBar-active-window.png"><img src="Docs/DexBar-active-window.png" width="560" alt="A weekly forecast of 74% with a 62–87% range, above an active five-hour window"></a>
 </p>
 
 <p align="center"><sub>An active five-hour window, using sample data.</sub></p>
 
-Projection is shown on the same meter. The marker indicates the central estimate; its tooltip
-explains the measured pace, uncertainty range, and estimated limit time when applicable. Orange
-and red appear only when the uncertainty range says the allowance may or is likely to run out.
+The percentage above the bar is the main estimate of your usage at reset. For estimates up to
+100%, a tick marks the value on the bar. The two percentages below show the low and high estimates,
+allowing for differences in measured pace and rounding. The shaded band shows the part of the range
+within the allowance. A chevron means the range extends past it. Orange means the range reaches
+the limit, while red means the entire range is at or above it. Select the info button beside the
+projection for an explanation.
 Weekly forecasts measure elapsed time, including quiet periods. A closely observed overnight
 pause before the next allowance starts also counts; unknown gaps are not assumed to be idle.
 Prior usage percentages never carry into the new allowance. Forecast-based alerts wait until
 the current allowance has a full day of evidence; actual 80% and 95% usage alerts work as usual.
 
 <p align="center">
-  <a href="Docs/DexBar-projection-warning.png"><img src="Docs/DexBar-projection-warning.png" width="600" alt="DexBar warning that projected weekly usage exceeds the limit"></a>
+  <a href="Docs/DexBar-projection-warning.png"><img src="Docs/DexBar-projection-warning.png" width="600" alt="A weekly forecast of 69% with an orange range of 52–110% that extends past the limit"></a>
 </p>
 
-<p align="center"><sub>A weekly projection crossing the limit, using sample data.</sub></p>
+<p align="center"><sub>A weekly forecast range crossing the limit, using sample data.</sub></p>
 
 ## Usage credits
 
@@ -231,9 +234,9 @@ development build: its menu-bar symbol is a hammer, automatic updates and login-
 are disabled, and the About pane identifies it as Development. The build script refuses to
 replace that exact development bundle while it is running.
 
-The number in parentheses after the version is the build number: **0.2.7 (31)** identifies the
-0.2.7 release. Builds derive this number from the Git commit count, so new commits increase it;
-rebuilding the same commit keeps the same number. Sparkle uses it to compare updates.
+The number in parentheses after the version is the build number. DexBar derives it from the Git
+commit count. Sparkle uses it to compare updates, and rebuilding the same commit keeps the same
+number.
 
 Regenerate every standard and Retina icon representation, plus `Resources/AppIcon.icns`, with:
 
