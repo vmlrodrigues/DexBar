@@ -89,7 +89,9 @@ The tooltip discloses both paces and a conservative reset-date range. The range 
 
 Weekly projection starts after 24 hours of observations. Short-window projection starts after one hour but remains invisible below a projected 60%, because five-hour usage is commonly front-loaded and a low estimate is unactionable furniture. Unchanged samples are retained at most hourly, samples expire after eight days, reset timestamps tolerate one minute of server jitter, reset changes naturally start a new baseline, and the user can clear history in Settings. A failed refresh freezes the projection at the last successful snapshot time instead of letting stale data drift forward.
 
-The projected extent is drawn beneath current usage as a translucent continuation. An anchored marker labels projections up to 100%; off-scale projections replace the false 100% endpoint with one to three chevrons and a right-aligned value.
+The meter shades the forecast range and connects each endpoint percentage to the band. The
+main forecast has a stronger marker. A chevron marks values beyond 100% without stretching
+the track, and the info button explains the range on click.
 
 ## Failure behaviour
 

@@ -144,6 +144,10 @@ enum DexBarMain {
 
     @MainActor
     private static func renderPopover(path: String, state: String) {
+        if state == "forecast-info" {
+            render(view: ForecastInfo(), path: path)
+            return
+        }
         let snapshot = state == "auth" ? nil : previewSnapshot(state: state)
         let loadState: LoadState
         switch state {
@@ -154,12 +158,23 @@ enum DexBarMain {
         }
         let projection: Projection?
         switch state {
-        case "warning": projection = Projection(projectedPercent: 109, pointsPerDay: 5.0, daysRemaining: 6.95, outlook: .mayRunOut, limitReachedAt: Date().addingTimeInterval(5.2 * 86_400))
-        case "critical": projection = Projection(projectedPercent: 118, pointsPerDay: 3.2, daysRemaining: 6.95, outlook: .likelyToRunOut, limitReachedAt: Date().addingTimeInterval(1.25 * 86_400))
+        case "warning": projection = Projection(projectedPercent: 109, pointsPerDay: 5.0, lowerProjectedPercent: 85, upperProjectedPercent: 123, daysRemaining: 6.95, outlook: .mayRunOut, limitReachedAt: Date().addingTimeInterval(5.2 * 86_400))
+        case "critical": projection = Projection(projectedPercent: 118, pointsPerDay: 3.2, lowerProjectedPercent: 104, upperProjectedPercent: 135, daysRemaining: 6.95, outlook: .likelyToRunOut, limitReachedAt: Date().addingTimeInterval(1.25 * 86_400))
+        case "range-crosses-limit":
+            projection = Projection(projectedPercent: 69, pointsPerDay: 8.66, longTermPointsPerDay: 14.88,
+                recentPointsPerDay: 6.59, lowerProjectedPercent: 52, upperProjectedPercent: 110,
+                daysRemaining: 5.684, outlook: .mayRunOut, limitReachedAt: nil)
+        case "range-narrow":
+            projection = Projection(projectedPercent: 84, pointsPerDay: 1.58,
+                lowerProjectedPercent: 81, upperProjectedPercent: 88,
+                daysRemaining: 5.684, outlook: .onTrack, limitReachedAt: nil)
         case "rollover", "rollover-warning":
             projection = snapshot.flatMap { previewRolloverProjection($0, warning: state == "rollover-warning") }
         case "current": projection = nil
-        default: projection = Projection(projectedPercent: 74, pointsPerDay: 4.3, daysRemaining: 6.95, outlook: .onTrack, limitReachedAt: nil)
+        default:
+            projection = Projection(projectedPercent: 74, pointsPerDay: 4.3,
+                lowerProjectedPercent: 62, upperProjectedPercent: 87,
+                daysRemaining: 6.95, outlook: .onTrack, limitReachedAt: nil)
         }
         let model = AppModel.preview(
             snapshot: snapshot,
@@ -194,6 +209,8 @@ enum DexBarMain {
         switch state {
         case "warning": weeklyPercent = 74
         case "critical": weeklyPercent = 96
+        case "range-crosses-limit": weeklyPercent = 20
+        case "range-narrow": weeklyPercent = 75
         case "stale": weeklyPercent = 58
         case "history", "history-reset": weeklyPercent = 4
         case "history-extended": weeklyPercent = 0
@@ -201,7 +218,9 @@ enum DexBarMain {
         default: weeklyPercent = state == "current" ? 1 : 44
         }
         let reset: Date
-        if state == "history-extended" {
+        if state.hasPrefix("range-") {
+            reset = now.addingTimeInterval(5.684 * 86_400)
+        } else if state == "history-extended" {
             reset = now.addingTimeInterval(7 * 86_400)
         } else if state == "history" || state == "history-reset" {
             let calendar = Calendar.current
