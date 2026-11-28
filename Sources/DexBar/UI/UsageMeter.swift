@@ -4,6 +4,7 @@ import DexBarCore
 struct UsageMeter: View {
     let window: UsageWindow
     let projection: Projection?
+    var showsForecastRange = true
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -22,10 +23,13 @@ struct UsageMeter: View {
                     VStack(alignment: .leading, spacing: 0) {
                         forecastLabel(projection, layout: layout)
                         track(width: layout.trackWidth, layout: layout)
-                        bounds(projection, layout: layout)
+                        if showsForecastRange {
+                            bounds(projection, layout: layout)
+                        }
                     }
                 }
-                .frame(height: Self.forecastLabelHeight + Self.trackHeight + Self.boundLabelsHeight)
+                .frame(height: Self.forecastLabelHeight + Self.trackHeight
+                    + (showsForecastRange ? Self.boundLabelsHeight : 0))
                 if window.isWeekly, projection.historicalPointsPerDay != nil {
                     Text("Based on recent history")
                         .font(.system(size: 10))
@@ -42,12 +46,14 @@ struct UsageMeter: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(window.title)
-        .accessibilityValue(Self.accessibilityValue(for: window, projection: projection))
+        .accessibilityValue(Self.accessibilityValue(
+            for: window, projection: projection, showsForecastRange: showsForecastRange
+        ))
     }
 
     private func forecastLabel(_ projection: Projection, layout: ForecastMeterLayout) -> some View {
         let labelWidth: CGFloat = 94
-        let infoWidth: CGFloat = 18
+        let infoWidth: CGFloat = showsForecastRange ? 18 : 0
         let left = min(max(0, layout.projectionX - labelWidth / 2),
                        max(0, layout.trackWidth - labelWidth - infoWidth))
         return HStack(spacing: 0) {
@@ -58,9 +64,11 @@ struct UsageMeter: View {
                 .minimumScaleFactor(0.8)
                 .frame(width: labelWidth)
                 .help(projectionDetail(projection))
-            Color.clear
-                .frame(width: infoWidth, height: 16)
-                .anchorPreference(key: ForecastInfoAnchor.self, value: .bounds) { $0 }
+            if showsForecastRange {
+                Color.clear
+                    .frame(width: infoWidth, height: 16)
+                    .anchorPreference(key: ForecastInfoAnchor.self, value: .bounds) { $0 }
+            }
         }
         .frame(height: Self.forecastLabelHeight, alignment: .top)
         .offset(x: left)
@@ -68,15 +76,16 @@ struct UsageMeter: View {
 
     private func track(width: CGFloat, layout: ForecastMeterLayout? = nil) -> some View {
         let usedWidth = width * window.utilization
-        // A small nonzero reading gets a dot up to the start of the forecast band.
-        let minimumUsageWidth = min(Self.trackHeight, layout?.lowerX ?? width)
+        let forecastStart = layout.map { showsForecastRange ? $0.lowerX : usedWidth } ?? width
+        // Keep the minimum-width usage dot from covering the forecast fill.
+        let minimumUsageWidth = min(Self.trackHeight, forecastStart)
         let fillWidth = usedWidth > 0 ? min(width, max(usedWidth, minimumUsageWidth)) : 0
 
         return ZStack(alignment: .leading) {
             Capsule().fill(Color.secondary.opacity(0.18))
             if let layout {
-                let start = min(layout.lowerX, width)
-                let end = min(layout.upperX, width)
+                let start = min(forecastStart, width)
+                let end = min(showsForecastRange ? layout.upperX : layout.projectionX, width)
                 Rectangle()
                     .fill(projectionColor.opacity(0.32))
                     .frame(width: max(0, end - start))
@@ -90,6 +99,8 @@ struct UsageMeter: View {
         .clipShape(Capsule())
         .overlay(alignment: .leading) {
             if let layout, let projection {
+                let overflowPercent = showsForecastRange
+                    ? projection.upperProjectedPercent : projection.projectedPercent
                 // Both markers measure their offset from the track's leading edge.
                 ZStack(alignment: .leading) {
                     if projection.projectedPercent <= 100 {
@@ -98,7 +109,7 @@ struct UsageMeter: View {
                             .frame(width: min(2, width), height: 14)
                             .offset(x: min(max(0, layout.projectionX - 1), max(0, width - 2)))
                     }
-                    if projection.upperProjectedPercent > 100 {
+                    if overflowPercent > 100 {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(leaderColor)
@@ -145,8 +156,14 @@ struct UsageMeter: View {
         colorScheme == .dark ? Color(white: 0.68) : Color(white: 0.40)
     }
 
+    private var displayOutlook: Projection.Outlook? {
+        guard let projection else { return nil }
+        if showsForecastRange { return projection.outlook }
+        return projection.projectedPercent >= 100 ? .mayRunOut : .onTrack
+    }
+
     private var leaderColor: Color {
-        switch projection?.outlook {
+        switch displayOutlook {
         case .mayRunOut:
             return colorScheme == .dark ? Color(red: 1, green: 0.69, blue: 0.32)
                 : Color(red: 0.59, green: 0.31, blue: 0.02)
@@ -159,20 +176,26 @@ struct UsageMeter: View {
     }
 
     private var projectionColor: Color {
-        switch projection?.outlook {
+        switch displayOutlook {
         case .mayRunOut: return .orange
         case .likelyToRunOut: return .red
         default: return .secondary
         }
     }
 
-    static func accessibilityValue(for window: UsageWindow, projection: Projection?) -> String {
+    static func accessibilityValue(
+        for window: UsageWindow, projection: Projection?, showsForecastRange: Bool = true
+    ) -> String {
         var value = "\(window.roundedPercent) percent used"
         if let projection {
             value += ", projected \(projection.projectedPercent) percent"
-            value += ", forecast range \(projection.lowerProjectedPercent) to \(projection.upperProjectedPercent) percent"
-            if projection.outlook == .mayRunOut { value += ", may hit limit" }
-            if projection.outlook == .likelyToRunOut { value += ", likely to hit limit" }
+            if showsForecastRange {
+                value += ", forecast range \(projection.lowerProjectedPercent) to \(projection.upperProjectedPercent) percent"
+                if projection.outlook == .mayRunOut { value += ", may hit limit" }
+                if projection.outlook == .likelyToRunOut { value += ", likely to hit limit" }
+            } else if projection.projectedPercent >= 100 {
+                value += ", projected to reach the limit"
+            }
             if projection.historicalPointsPerDay != nil { value += ", based on recent history" }
             if projection.isPreliminary { value += ", preliminary forecast" }
         }
@@ -187,29 +210,37 @@ struct UsageMeter: View {
                 historical
             )]
             lines.append("This week's measured pace gradually replaces that history during its first 24 hours.")
-            lines.append(
-                "This preliminary forecast has a range of "
-                    + "\(projection.lowerProjectedPercent)–\(projection.upperProjectedPercent)%; early activity may not represent a full day."
-            )
+            if showsForecastRange {
+                lines.append(
+                    "This preliminary forecast has a range of "
+                        + "\(projection.lowerProjectedPercent)–\(projection.upperProjectedPercent)%; early activity may not represent a full day."
+                )
+            } else {
+                lines.append("Early activity may not represent a full day.")
+            }
         } else if let recent = projection.recentPointsPerDay {
             lines = [String(
                 format: "Blends a smoothed recent pace (%.1f points/day) with the window average (%.1f points/day).",
                 recent,
                 projection.longTermPointsPerDay
             )]
-            lines.append(
-                "Those paces plus whole-point measurement uncertainty project "
-                    + "\(projection.lowerProjectedPercent)–\(projection.upperProjectedPercent)%; the marker uses the blend."
-            )
+            if showsForecastRange {
+                lines.append(
+                    "Those paces plus whole-point measurement uncertainty project "
+                        + "\(projection.lowerProjectedPercent)–\(projection.upperProjectedPercent)%; the marker uses the blend."
+                )
+            }
         } else {
             lines = [String(
                 format: "Projected from the window average of %.1f percentage points per day.",
                 projection.longTermPointsPerDay
             )]
-            lines.append(
-                "Whole-point measurement uncertainty gives a range of "
-                    + "\(projection.lowerProjectedPercent)–\(projection.upperProjectedPercent)%."
-            )
+            if showsForecastRange {
+                lines.append(
+                    "Whole-point measurement uncertainty gives a range of "
+                        + "\(projection.lowerProjectedPercent)–\(projection.upperProjectedPercent)%."
+                )
+            }
             if window.isWeekly {
                 lines.append("A recent trend needs at least 3 percentage points measured over 6–24 hours.")
             }
@@ -223,10 +254,12 @@ struct UsageMeter: View {
             )
             lines.append("At this rate the limit arrives \(formatter.string(from: reachedAt)).")
         }
-        switch projection.outlook {
-        case .onTrack: lines.append("On track to finish this window under the limit.")
-        case .mayRunOut: lines.append("Close enough to the limit that it could go either way.")
-        case .likelyToRunOut: lines.append("Heading over the limit before this window resets.")
+        if showsForecastRange {
+            switch projection.outlook {
+            case .onTrack: lines.append("On track to finish this window under the limit.")
+            case .mayRunOut: lines.append("Close enough to the limit that it could go either way.")
+            case .likelyToRunOut: lines.append("Heading over the limit before this window resets.")
+            }
         }
         return lines.joined(separator: "\n")
     }

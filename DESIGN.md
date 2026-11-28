@@ -93,6 +93,9 @@ The meter shades the forecast range and connects each endpoint percentage to the
 main forecast has a stronger marker. A chevron marks values beyond 100% without stretching
 the track, and the info button explains the range on click.
 
+When **Show forecast range** is off, the meter shades from current usage to the main
+estimate. The estimate drives the forecast colour and overflow chevron in this view.
+
 ## Failure behaviour
 
 - A temporary refresh failure retains the last successful snapshot and marks it stale.

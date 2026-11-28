@@ -20,10 +20,13 @@ enum BarFormat: String, CaseIterable, Identifiable {
 @MainActor
 final class Preferences: ObservableObject {
     static let shared = Preferences()
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
 
     @Published var barFormat: BarFormat {
         didSet { defaults.set(barFormat.rawValue, forKey: Keys.barFormat) }
+    }
+    @Published var showsForecastRange: Bool {
+        didSet { defaults.set(showsForecastRange, forKey: Keys.showsForecastRange) }
     }
     @Published var notificationsEnabled: Bool {
         didSet { defaults.set(notificationsEnabled, forKey: Keys.notificationsEnabled) }
@@ -43,6 +46,7 @@ final class Preferences: ObservableObject {
 
     private enum Keys {
         static let barFormat = "barFormat"
+        static let showsForecastRange = "showsForecastRange"
         static let notificationsEnabled = "notificationsEnabled"
         static let completedOnboarding = "completedOnboarding"
         static let popoverHotKeyEnabled = "popoverHotKeyEnabled"
@@ -50,9 +54,11 @@ final class Preferences: ObservableObject {
         static let popoverHotKeyModifiers = "popoverHotKeyModifiers"
     }
 
-    private init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         defaults.register(defaults: [
             Keys.barFormat: BarFormat.percentTime.rawValue,
+            Keys.showsForecastRange: true,
             Keys.notificationsEnabled: true,
             Keys.completedOnboarding: false,
             Keys.popoverHotKeyEnabled: false,
@@ -60,6 +66,7 @@ final class Preferences: ObservableObject {
             Keys.popoverHotKeyModifiers: DefaultHotKey.unsetModifiers,
         ])
         barFormat = BarFormat(rawValue: defaults.string(forKey: Keys.barFormat) ?? "") ?? .percentTime
+        showsForecastRange = defaults.bool(forKey: Keys.showsForecastRange)
         notificationsEnabled = defaults.bool(forKey: Keys.notificationsEnabled)
         completedOnboarding = defaults.bool(forKey: Keys.completedOnboarding)
         popoverHotKeyEnabled = defaults.bool(forKey: Keys.popoverHotKeyEnabled)

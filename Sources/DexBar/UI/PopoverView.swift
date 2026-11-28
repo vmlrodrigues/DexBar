@@ -6,6 +6,7 @@ struct PopoverView: View {
     private static let minimumHistoryContentHeight: CGFloat = 102
 
     @ObservedObject var model: AppModel
+    @ObservedObject private var prefs = Preferences.shared
     let openSettings: () -> Void
     let openSignIn: () -> Void
     let quit: () -> Void
@@ -151,6 +152,7 @@ struct PopoverView: View {
                         UsageWindowRow(
                             window: snapshot.weekly,
                             projection: weeklyProjection,
+                            showsForecastRange: prefs.showsForecastRange,
                             historyHint: true,
                             now: now
                         )
@@ -160,7 +162,10 @@ struct PopoverView: View {
                     .keyboardShortcut(.rightArrow, modifiers: [])
                     .help("Show daily usage history (Right Arrow)")
                     .accessibilityLabel("Weekly usage. Show daily history.")
-                    .accessibilityValue(UsageMeter.accessibilityValue(for: snapshot.weekly, projection: weeklyProjection))
+                    .accessibilityValue(UsageMeter.accessibilityValue(
+                        for: snapshot.weekly, projection: weeklyProjection,
+                        showsForecastRange: prefs.showsForecastRange
+                    ))
                     .mouseOnlyPopoverControl()
                     .forecastInfoControl()
                     ForEach(snapshot.supplementary) { window in
@@ -168,6 +173,7 @@ struct PopoverView: View {
                         UsageWindowRow(
                             window: window,
                             projection: model.projection(for: window),
+                            showsForecastRange: prefs.showsForecastRange,
                             showContext: true,
                             now: now
                         )

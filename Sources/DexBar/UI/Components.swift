@@ -39,6 +39,7 @@ struct AppMark: View {
 struct UsageWindowRow: View {
     let window: UsageWindow
     var projection: Projection?
+    var showsForecastRange = true
     var showContext = false
     var historyHint = false
     let now: Date
@@ -63,7 +64,7 @@ struct UsageWindowRow: View {
                     .monospacedDigit()
                     .foregroundStyle(window.health.color)
             }
-            UsageMeter(window: window, projection: projection)
+            UsageMeter(window: window, projection: projection, showsForecastRange: showsForecastRange)
             HStack(spacing: 4) {
                 Text("Resets \(resetDescription(window.resetsAt, relativeTo: now)) · in \(shortDuration(window.resetsAt.timeIntervalSince(now)))")
                     .lineLimit(1)
