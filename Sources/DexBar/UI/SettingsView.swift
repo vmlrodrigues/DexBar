@@ -185,7 +185,7 @@ struct SettingsView: View {
             group {
                 settingsRow(
                     title: "Display",
-                    detail: "Weekly by default. An active, more urgent window is surfaced automatically."
+                    detail: "Weekly by default. Urgent windows take priority."
                 ) {
                     Text("Automatic").foregroundStyle(.secondary)
                 }
@@ -205,6 +205,8 @@ struct SettingsView: View {
                     .labelsHidden()
                     .frame(width: 150)
                 }
+                Divider()
+                Toggle("Show forecast range", isOn: $prefs.showsForecastRange)
             }
             group {
                 Toggle("Show the popover with a keyboard shortcut", isOn: $prefs.popoverHotKeyEnabled)

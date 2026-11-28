@@ -24,9 +24,9 @@ SwiftUI and AppKit, contains no web view, and stays out of the Dock. The normal 
 deliberately quiet: weekly usage remains primary, while shorter or model-specific limits
 surface only when Codex reports that they matter.
 
-Version **0.3.0** shows the forecast range directly on the usage bar. The info button explains
-how to read the range and how to tell when it extends past your allowance.
-See the [0.3.0 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.3.0).
+Version **0.3.1** adds **Show forecast range** in **Settings → Menu Bar**. Turn it off for a
+compact meter that shows the main forecast.
+See the [0.3.1 release notes](https://github.com/vmlrodrigues/DexBar/releases/tag/v0.3.1).
 
 <p align="center">
   <a href="Docs/DexBar-current.png"><img src="Docs/DexBar-current.png" width="600" alt="DexBar showing the minimal weekly usage view"></a>
@@ -127,6 +127,11 @@ allowing for differences in measured pace and rounding. The shaded band shows th
 within the allowance. A chevron means the range extends past it. Orange means the range reaches
 the limit, while red means the entire range is at or above it. Select the info button beside the
 projection for an explanation.
+
+Turn off **Show forecast range** in **Settings → Menu Bar** to use the compact meter. The
+shading extends from current usage to the main estimate. The forecast shade turns orange
+when that estimate reaches 100%, and a chevron marks estimates above 100%.
+
 Weekly forecasts measure elapsed time, including quiet periods. A closely observed overnight
 pause before the next allowance starts also counts; unknown gaps are not assumed to be idle.
 Prior usage percentages never carry into the new allowance. Forecast-based alerts wait until
